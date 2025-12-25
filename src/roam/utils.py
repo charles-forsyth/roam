@@ -1,3 +1,5 @@
+from math import radians, cos, sin, asin, sqrt
+
 def decode_polyline(polyline_str):
     """Decodes a Polyline string into a list of lat/lng dicts."""
     index, lat, lng = 0, 0, 0
@@ -52,3 +54,20 @@ def encode_polyline(points):
         prev_lat, prev_lng = lat, lng
         
     return "".join(encoded)
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great circle distance between two points 
+    on the earth (specified in decimal degrees)
+    Returns distance in miles.
+    """
+    # convert decimal degrees to radians 
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+
+    # haversine formula 
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a)) 
+    r = 3956 # Radius of earth in miles. Use 6371 for km
+    return c * r
