@@ -408,7 +408,8 @@ def route(
                         table.add_column("Name", style="cyan")
                         table.add_column("Address", style="white")
 
-                        for place in places[:5]:
+                        # Show all results
+                        for place in places:
                             name = place.get("displayName", {}).get("text", "Unknown")
                             addr = place.get("formattedAddress", "Unknown Address")
                             table.add_row(name, addr)

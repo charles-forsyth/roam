@@ -72,31 +72,50 @@ class RouteRequester:
     def search_along_route(self, query: str, polyline: str) -> List[Dict[str, Any]]:
         """
         Searches for places along the route polyline using Places API (New).
+        Handles pagination to retrieve up to 60 results (approx).
         """
-        payload = {
-            "textQuery": query,
-            "searchAlongRouteParameters": {
-                "polyline": {
-                    "encodedPolyline": polyline
-                }
-            }
-        }
+        all_places = []
+        next_page_token = None
         
         # We request name, formatting address, and location
         headers = {
-            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location"
+            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,nextPageToken"
         }
 
-        try:
-            response = self.session.post(self.PLACES_BASE_URL, json=payload, headers=headers, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("places", [])
-        except requests.exceptions.RequestException as e:
-            console.print(f"[bold red]Error searching along route for '{query}':[/bold red] {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                console.print(f"[red]Details:[/red] {e.response.text}")
-            return []
+        # Max 3 pages (default 20 per page = 60 results) to avoid excessive API usage
+        for _ in range(3):
+            payload = {
+                "textQuery": query,
+                "searchAlongRouteParameters": {
+                    "polyline": {
+                        "encodedPolyline": polyline
+                    }
+                }
+            }
+            
+            if next_page_token:
+                payload["pageToken"] = next_page_token
+
+            try:
+                response = self.session.post(self.PLACES_BASE_URL, json=payload, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                
+                places = data.get("places", [])
+                if places:
+                    all_places.extend(places)
+                
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token:
+                    break
+                    
+            except requests.exceptions.RequestException as e:
+                console.print(f"[bold red]Error searching along route for '{query}':[/bold red] {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    console.print(f"[red]Details:[/red] {e.response.text}")
+                break
+                
+        return all_places
 
     def get_weather(self, lat: float, lng: float) -> Dict[str, Any]:
         """
