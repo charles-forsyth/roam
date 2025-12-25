@@ -33,7 +33,7 @@ class DefaultGroup(click.Group):
                 raise
 
 
-@click.group(cls=DefaultGroup, default_command="route")
+@click.group(cls=DefaultGroup, default_command="route", context_settings={"help_option_names": ["-h", "--help"]})
 def cli():
     """
     Roam: The Personal Routing Commander.
@@ -53,11 +53,12 @@ def format_duration(seconds_str):
         return seconds_str
 
 
-@cli.command()
+@cli.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("destination")
 @click.option(
     "--origin",
     "-f",
+    "-o",
     help="Starting point (default: 'home' preset or New York)",
     default="home",
 )
@@ -73,9 +74,9 @@ def format_duration(seconds_str):
     type=click.Choice(["gasoline", "electric", "hybrid", "diesel"]),
     help="Engine type (for drive mode)",
 )
-@click.option("--avoid-tolls", is_flag=True, help="Avoid tolls")
-@click.option("--avoid-highways", is_flag=True, help="Avoid highways")
-@click.option("--with", "vehicle_alias", help="Use a preset vehicle configuration")
+@click.option("--avoid-tolls", "-t", is_flag=True, help="Avoid tolls")
+@click.option("--avoid-highways", "-H", is_flag=True, help="Avoid highways")
+@click.option("--with", "-w", "vehicle_alias", help="Use a preset vehicle configuration")
 @click.option("--directions", "-d", is_flag=True, help="Show turn-by-turn directions")
 def route(
     destination,
@@ -171,7 +172,7 @@ def route(
 
     console.print(
         Panel(
-            f"Routing from [bold]{origin}[/bold] to [bold cyan]{destination}[/bold cyan] {' '.join(status_parts)}...",
+            f"Routing from [bold]{origin}[/bold] to [bold cyan]{destination}[/bold cyan] {" ".join(status_parts)}...",
             title="Roam",
         )
     )
@@ -246,13 +247,13 @@ def route(
 
 
 # --- Garage Commands ---
-@cli.group()
+@cli.group(context_settings={"help_option_names": ["-h", "--help"]})
 def garage():
     """Manage your fleet of vehicles."""
     pass
 
 
-@garage.command(name="add")
+@garage.command(name="add", context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("name")
 @click.option(
     "--mode",
@@ -267,8 +268,8 @@ def garage():
     type=click.Choice(["gasoline", "electric", "hybrid", "diesel"]),
     help="Engine type (for drive mode)",
 )
-@click.option("--avoid-tolls", is_flag=True, help="Avoid tolls")
-@click.option("--avoid-highways", is_flag=True, help="Avoid highways")
+@click.option("--avoid-tolls", "-t", is_flag=True, help="Avoid tolls")
+@click.option("--avoid-highways", "-H", is_flag=True, help="Avoid highways")
 def garage_add(name, mode, engine, avoid_tolls, avoid_highways):
     """Add a vehicle to your garage."""
     if not settings:
@@ -282,7 +283,7 @@ def garage_add(name, mode, engine, avoid_tolls, avoid_highways):
     console.print(f"[green]Added [bold]{name}[/bold] to garage![/green]")
 
 
-@garage.command(name="list")
+@garage.command(name="list", context_settings={"help_option_names": ["-h", "--help"]})
 def garage_list():
     """List all vehicles in your garage."""
     if not settings:
@@ -312,7 +313,7 @@ def garage_list():
     console.print(table)
 
 
-@garage.command(name="remove")
+@garage.command(name="remove", context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("name")
 def garage_remove(name):
     """Remove a vehicle from your garage."""
@@ -329,13 +330,13 @@ def garage_remove(name):
 
 
 # --- Places Commands ---
-@cli.group()
+@cli.group(context_settings={"help_option_names": ["-h", "--help"]})
 def places():
     """Manage saved addresses (home, work, etc.)."""
     pass
 
 
-@places.command(name="add")
+@places.command(name="add", context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("name")
 @click.argument("address")
 def places_add(name, address):
@@ -349,7 +350,7 @@ def places_add(name, address):
     console.print(f"[green]Added [bold]{name}[/bold]: {address}[/green]")
 
 
-@places.command(name="list")
+@places.command(name="list", context_settings={"help_option_names": ["-h", "--help"]})
 def places_list():
     """List all saved places."""
     if not settings:
@@ -371,7 +372,7 @@ def places_list():
     console.print(table)
 
 
-@places.command(name="remove")
+@places.command(name="remove", context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("name")
 def places_remove(name):
     """Remove a saved place."""
