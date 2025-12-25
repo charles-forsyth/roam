@@ -1,4 +1,6 @@
 from roam.core import RouteRequester
+from roam.cli import find_forecast_for_time
+from datetime import datetime, timezone
 
 def test_search_along_route_mock(mocker):
     # Mock requests.Session.post
@@ -55,3 +57,41 @@ def test_get_weather_mock(mocker):
     args, kwargs = mock_get.call_args
     assert kwargs["params"]["location.latitude"] == 37.77
     assert kwargs["params"]["location.longitude"] == -122.41
+
+def test_get_hourly_forecast_mock(mocker):
+    mock_get = mocker.patch("requests.get")
+    mock_response = mocker.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"hourlyForecasts": []}
+    mock_get.return_value = mock_response
+    
+    requester = RouteRequester(api_key="fake_key")
+    requester.get_hourly_forecast(10, 20)
+    
+    args, kwargs = mock_get.call_args
+    assert kwargs["params"]["location.latitude"] == 10
+    assert kwargs["params"]["location.longitude"] == 20
+
+def test_find_forecast_for_time():
+    data = {
+        "hourlyForecasts": [
+            {"forecastTime": "2025-12-25T10:00:00Z", "temp": 10},
+            {"forecastTime": "2025-12-25T11:00:00Z", "temp": 11},
+            {"forecastTime": "2025-12-25T12:00:00Z", "temp": 12},
+        ]
+    }
+    
+    # Exact match
+    target = datetime(2025, 12, 25, 11, 0, 0, tzinfo=timezone.utc)
+    match = find_forecast_for_time(data, target)
+    assert match["temp"] == 11
+    
+    # Closest match (11:20 -> 11:00)
+    target = datetime(2025, 12, 25, 11, 20, 0, tzinfo=timezone.utc)
+    match = find_forecast_for_time(data, target)
+    assert match["temp"] == 11
+    
+    # Closest match (11:40 -> 12:00)
+    target = datetime(2025, 12, 25, 11, 40, 0, tzinfo=timezone.utc)
+    match = find_forecast_for_time(data, target)
+    assert match["temp"] == 12

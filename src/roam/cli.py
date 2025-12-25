@@ -4,6 +4,7 @@ from rich.panel import Panel
 from rich.table import Table
 from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
+from datetime import datetime, timedelta, timezone
 import sys
 
 console = Console()
@@ -52,6 +53,44 @@ def format_duration(seconds_str):
     except Exception:
         return seconds_str
 
+def get_seconds(duration_str):
+    try:
+        return int(duration_str.replace("s", ""))
+    except Exception:
+        return 0
+
+def find_forecast_for_time(forecast_data, target_time):
+    """
+    Finds the hourly forecast entry closest to target_time.
+    """
+    hourly = forecast_data.get("hourlyForecasts", [])
+    if not hourly:
+        return None
+        
+    closest = None
+    min_diff = float("inf")
+    
+    for entry in hourly:
+        forecast_time_str = entry.get("forecastTime")
+        if not forecast_time_str:
+            continue
+        
+        # Parse ISO string (e.g. 2025-12-25T20:00:00Z)
+        # Note: python 3.11+ has datetime.fromisoformat support for Z, but standard library before might need care.
+        # We rely on dateutil.parser if available or robust replacement.
+        # Since we didn't add python-dateutil to dependencies, let's use string replace Z for +00:00
+        
+        try:
+            f_time = datetime.fromisoformat(forecast_time_str.replace("Z", "+00:00"))
+            diff = abs((f_time - target_time).total_seconds())
+            
+            if diff < min_diff:
+                min_diff = diff
+                closest = entry
+        except ValueError:
+            continue
+            
+    return closest
 
 @cli.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("destination")
@@ -79,7 +118,7 @@ def format_duration(seconds_str):
 @click.option("--with", "-w", "vehicle_alias", help="Use a preset vehicle configuration")
 @click.option("--directions", "-d", is_flag=True, help="Show turn-by-turn directions")
 @click.option("--find", "-F", multiple=True, help="Search for places along the route (e.g. -F gas -F food)")
-@click.option("--weather", "-W", is_flag=True, help="Show weather at start and destination")
+@click.option("--weather", "-W", is_flag=True, help="Show weather forecast along the route")
 def route(
     destination,
     origin,
@@ -112,12 +151,8 @@ def route(
         final_origin = places[origin]
         console.print(f"[dim]Resolved origin '{origin}' to: {final_origin}[/dim]")
     elif origin == "home" and "home" not in places:
-        # Fallback if user hasn't set 'home' yet
         console.print(
             "[yellow]No 'home' preset found. Using default (New York, NY).[/yellow]"
-        )
-        console.print(
-            "[dim]Tip: Set your home address with: `roam places add home 'Your Address'`[/dim]"
         )
         final_origin = "New York, NY"
 
@@ -135,7 +170,6 @@ def route(
     final_avoid_tolls = False
     final_avoid_highways = False
 
-    # 1. Load from Garage if specified
     if vehicle_alias:
         garage = settings.load_garage()
         vehicle = garage.get(vehicle_alias)
@@ -165,7 +199,6 @@ def route(
 
     requester = RouteRequester(api_key=settings.google_maps_api_key)
 
-    # Build status string
     status_parts = [f"via [bold green]{final_mode}[/bold green]"]
     if final_engine:
         status_parts.append(f"([cyan]{final_engine}[/cyan])")
@@ -199,47 +232,88 @@ def route(
             encoded_polyline = route_obj.get("polyline", {}).get("encodedPolyline", "")
             miles = int(distance) * 0.000621371
 
-            # Format time
             fmt_duration = format_duration(duration)
 
             console.print(f"[bold]Distance:[/bold] {miles:.2f} miles")
             console.print(f"[bold]Duration:[/bold] {fmt_duration}")
             
-            # --- Weather ---
+            # --- Smart Forecast Weather ---
             if weather:
-                console.print("\n[bold]Weather Conditions:[/bold]")
+                console.print("\n[bold]Route Forecast:[/bold]")
                 legs = route_obj.get("legs", [])
-                if legs:
-                    # Get Start Location
-                    start = legs[0].get("startLocation", {}).get("latLng", {})
-                    # Get End Location
-                    end = legs[-1].get("endLocation", {}).get("latLng", {})
-                    
-                    points = [("Start", start), ("Destination", end)]
-                    
-                    weather_table = Table(box=None)
-                    weather_table.add_column("Location", style="bold")
-                    weather_table.add_column("Temp", style="cyan")
-                    weather_table.add_column("Condition", style="yellow")
-                    weather_table.add_column("Humidity", style="blue")
-                    
-                    for label, loc in points:
-                        lat, lng = loc.get("latitude"), loc.get("longitude")
-                        if lat and lng:
-                            w_data = requester.get_weather(lat, lng)
-                            # w_data is the current conditions object directly
+                
+                # We want to sample points every ~1 hour (3600s)
+                SAMPLE_INTERVAL = 3600 
+                
+                current_elapsed = 0
+                last_sample_time = -SAMPLE_INTERVAL # Force sample at 0
+                
+                samples = [] # List of (time_offset, lat, lng, description)
+                
+                # Start Point
+                start_loc = legs[0].get("startLocation", {}).get("latLng", {})
+                if start_loc:
+                    samples.append((0, start_loc.get("latitude"), start_loc.get("longitude"), "Start"))
+
+                # Walk the steps to find intermediate points
+                for leg in legs:
+                    for step in leg.get("steps", []):
+                        step_dur = get_seconds(step.get("staticDuration", "0s"))
+                        
+                        # Check if we should sample in this step
+                        # Ideally, we sample at the END of the step if it crosses a threshold
+                        # Simple logic: if current_elapsed > last_sample + interval
+                        
+                        if current_elapsed > last_sample_time + SAMPLE_INTERVAL:
+                            end_loc = step.get("endLocation", {}).get("latLng", {})
+                            if end_loc:
+                                samples.append((current_elapsed, end_loc.get("latitude"), end_loc.get("longitude"), f"En Route (+{format_duration(str(current_elapsed)+'s')})"))
+                                last_sample_time = current_elapsed
+                        
+                        current_elapsed += step_dur
+
+                # Destination Point
+                total_dur = get_seconds(duration)
+                end_loc = legs[-1].get("endLocation", {}).get("latLng", {})
+                if end_loc:
+                    # Only add if significant time passed since last sample
+                    if total_dur > last_sample_time + (SAMPLE_INTERVAL / 2):
+                        samples.append((total_dur, end_loc.get("latitude"), end_loc.get("longitude"), "Destination"))
+
+                # Fetch Forecasts
+                weather_table = Table(box=None)
+                weather_table.add_column("Location / Time", style="bold")
+                weather_table.add_column("Forecast Temp", style="cyan")
+                weather_table.add_column("Condition", style="yellow")
+                weather_table.add_column("Precip %", style="blue")
+                
+                now = datetime.now(timezone.utc)
+                
+                with console.status("[bold green]Fetching forecast along route...[/bold green]"):
+                    for offset, lat, lng, desc in samples:
+                        target_time = now + timedelta(seconds=offset)
+                        
+                        # Fetch Hourly Forecast
+                        forecast_data = requester.get_hourly_forecast(lat, lng)
+                        match = find_forecast_for_time(forecast_data, target_time)
+                        
+                        if match:
+                            temp_c = match.get("temperature", {}).get("degrees")
+                            temp_f = (temp_c * 9/5) + 32 if temp_c is not None else None
+                            temp_str = f"{temp_f:.1f}°F" if temp_f else "N/A"
                             
-                            temp_c = w_data.get("temperature", {}).get("degrees")
-                            temp_f = (temp_c * 9/5) + 32 if temp_c is not None else "N/A"
+                            condition = match.get("weatherCondition", {}).get("description", {}).get("text", "Unknown")
+                            precip = match.get("precipitation", {}).get("probability", {}).get("percent", 0)
                             
-                            condition = w_data.get("weatherCondition", {}).get("description", {}).get("text", "Unknown")
-                            humidity = w_data.get("relativeHumidity", "N/A")
+                            # Format time label
+                            local_time_str = target_time.strftime("%I:%M %p")
+                            label = f"{desc}\n[dim]{local_time_str}[/dim]"
                             
-                            temp_str = f"{temp_f:.1f}°F" if isinstance(temp_f, float) else "N/A"
-                            
-                            weather_table.add_row(label, temp_str, condition, f"{humidity}%")
-                    
-                    console.print(weather_table)
+                            weather_table.add_row(label, temp_str, condition, f"{precip}%")
+                        else:
+                            weather_table.add_row(desc, "No Data", "-", "-")
+                
+                console.print(weather_table)
 
             # --- Search Along Route ---
             if find and encoded_polyline:
@@ -253,7 +327,6 @@ def route(
                         table.add_column("Name", style="cyan")
                         table.add_column("Address", style="white")
                         
-                        # Limit to top 5 results per query to avoid spam
                         for place in places[:5]:
                             name = place.get("displayName", {}).get("text", "Unknown")
                             addr = place.get("formattedAddress", "Unknown Address")

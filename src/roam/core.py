@@ -11,6 +11,7 @@ class RouteRequester:
     ROUTES_BASE_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
     PLACES_BASE_URL = "https://places.googleapis.com/v1/places:searchText"
     WEATHER_BASE_URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
+    FORECAST_BASE_URL = "https://weather.googleapis.com/v1/forecast:hourly"
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -105,7 +106,7 @@ class RouteRequester:
         params = {
             "location.latitude": lat,
             "location.longitude": lng,
-            "key": self.api_key # Weather API might require key in params for GET
+            "key": self.api_key 
         }
         
         # Removing Content-Type for GET
@@ -113,20 +114,28 @@ class RouteRequester:
         if "Content-Type" in headers:
             del headers["Content-Type"]
         
-        # NOTE: Using 'key' param because X-Goog-Api-Key header behavior varies on GET for some Google APIs.
-        # But let's try strict header first if possible, or just param.
-        # Documentation says standard params.
-        
         try:
-            # Note: The endpoint usually requires 'location' as a query param.
-            # Example: https://weather.googleapis.com/v1/currentConditions:lookup?location=37.7749,-122.4194
-            
             response = requests.get(self.WEATHER_BASE_URL, params=params, timeout=5)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            # Don't print error here to avoid spamming if weather fails for one point
             console.print(f"[red]Weather API Error:[/red] {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                console.print(f"[red]Details:[/red] {e.response.text}")
+            return {}
+
+    def get_hourly_forecast(self, lat: float, lng: float) -> Dict[str, Any]:
+        """
+        Fetches hourly weather forecast for a specific location.
+        """
+        params = {
+            "location.latitude": lat,
+            "location.longitude": lng,
+            "key": self.api_key 
+        }
+        
+        try:
+            response = requests.get(self.FORECAST_BASE_URL, params=params, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            console.print(f"[red]Forecast API Error:[/red] {e}")
             return {}
