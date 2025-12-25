@@ -1,9 +1,10 @@
 from roam.core import RouteRequester
 
+
 def test_compute_route_mock(mocker):
     # Mock requests.Session.post
     mock_post = mocker.patch("requests.Session.post")
-    
+
     # Setup mock response
     mock_response = mocker.Mock()
     mock_response.status_code = 200
@@ -12,7 +13,7 @@ def test_compute_route_mock(mocker):
             {
                 "distanceMeters": 16093,  # ~10 miles
                 "duration": "1200s",
-                "polyline": {"encodedPolyline": "dummy_polyline"}
+                "polyline": {"encodedPolyline": "dummy_polyline"},
             }
         ]
     }
