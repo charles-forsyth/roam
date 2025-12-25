@@ -1,5 +1,5 @@
 import requests
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from rich.console import Console
 
 console = Console()
@@ -16,7 +16,7 @@ class RouteRequester:
         self.session.headers.update({
             "Content-Type": "application/json",
             "X-Goog-Api-Key": self.api_key,
-            "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"
+            "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.steps.navigationInstruction,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration"
         })
 
     def compute_route(
