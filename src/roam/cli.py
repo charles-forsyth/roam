@@ -76,7 +76,7 @@ def find_forecast_for_time(forecast_data, target_time):
     """
     Finds the hourly forecast entry closest to target_time.
     """
-    hourly = forecast_data.get("hourlyForecasts", [])
+    hourly = forecast_data.get("forecastHours", [])
     if not hourly:
         return None
 
@@ -84,7 +84,7 @@ def find_forecast_for_time(forecast_data, target_time):
     min_diff = float("inf")
 
     for entry in hourly:
-        forecast_time_str = entry.get("forecastTime")
+        forecast_time_str = entry.get("interval", {}).get("startTime")
         if not forecast_time_str:
             continue
 
