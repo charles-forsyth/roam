@@ -72,21 +72,36 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     r = 3956 # Radius of earth in miles. Use 6371 for km
     return c * r
 
-def min_distance_to_polyline(point_lat, point_lng, polyline_points):
+def get_nearest_point_on_polyline(point_lat, point_lng, polyline_points):
     """
-    Calculates the minimum distance from a point to a polyline (list of dicts).
-    Optimized to check vertices.
+    Finds the nearest point on the polyline.
+    Returns (distance_in_miles, index_in_polyline).
     """
     min_dist = float("inf")
-    # For speed on large polylines, we simplify: find distance to nearest vertex.
-    # True projection is O(N) and expensive.
+    best_index = -1
     
-    # Optimization: Sample vertices? 
-    # Let's check all vertices. It's fast enough for ~5000 points in Python.
+    # We check every vertex. 
+    # For very long routes (5000+ points), this might be slow in Python (O(N)).
+    # We can optimize by step if needed, but let's stick to simple first.
     
-    for p in polyline_points:
+    for i, p in enumerate(polyline_points):
         d = haversine_distance(point_lat, point_lng, p["latitude"], p["longitude"])
         if d < min_dist:
             min_dist = d
+            best_index = i
             
-    return min_dist
+    return min_dist, best_index
+
+def calculate_cumulative_distances(polyline_points):
+    """
+    Returns a list of cumulative distances (in miles) for each point in the polyline.
+    """
+    distances = [0.0]
+    total = 0.0
+    for i in range(1, len(polyline_points)):
+        p1 = polyline_points[i-1]
+        p2 = polyline_points[i]
+        d = haversine_distance(p1["latitude"], p1["longitude"], p2["latitude"], p2["longitude"])
+        total += d
+        distances.append(total)
+    return distances
