@@ -34,10 +34,23 @@ class DefaultGroup(click.Group):
                 raise
 
 
-@click.group(cls=DefaultGroup, default_command="route", context_settings={"help_option_names": ["-h", "--help"]})
+@click.group(
+    cls=DefaultGroup,
+    default_command="route",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 def cli():
     """
+    
     Roam: The Personal Routing Commander.
+    -----------------------------------
+    Calculate routes, manage your vehicle fleet, and save favorite places.
+
+    
+    Examples:
+      roam "Los Angeles"
+      roam "Work" --with tesla
+      roam "Las Vegas" -m two_wheeler -H --weather
     """
     pass
 
@@ -66,31 +79,27 @@ def find_forecast_for_time(forecast_data, target_time):
     hourly = forecast_data.get("hourlyForecasts", [])
     if not hourly:
         return None
-        
+
     closest = None
     min_diff = float("inf")
-    
+
     for entry in hourly:
         forecast_time_str = entry.get("forecastTime")
         if not forecast_time_str:
             continue
-        
-        # Parse ISO string (e.g. 2025-12-25T20:00:00Z)
-        # Note: python 3.11+ has datetime.fromisoformat support for Z, but standard library before might need care.
-        # We rely on dateutil.parser if available or robust replacement.
-        # Since we didn't add python-dateutil to dependencies, let's use string replace Z for +00:00
-        
+
         try:
             f_time = datetime.fromisoformat(forecast_time_str.replace("Z", "+00:00"))
             diff = abs((f_time - target_time).total_seconds())
-            
+
             if diff < min_diff:
                 min_diff = diff
                 closest = entry
         except ValueError:
             continue
-            
+
     return closest
+
 
 @cli.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("destination")
@@ -98,27 +107,57 @@ def find_forecast_for_time(forecast_data, target_time):
     "--origin",
     "-f",
     "-o",
-    help="Starting point (default: 'home' preset or New York)",
+    help="Starting point (address or saved place). Defaults to 'home' if set.",
     default="home",
 )
 @click.option(
     "--mode",
     "-m",
     type=click.Choice(["drive", "bicycle", "two_wheeler", "transit", "walk"]),
-    help="Travel mode",
+    help="Travel mode (default: drive).\nExample: -m bicycle",
 )
 @click.option(
     "--engine",
     "-e",
     type=click.Choice(["gasoline", "electric", "hybrid", "diesel"]),
-    help="Engine type (for drive mode)",
+    help="Vehicle engine type for eco-routing (only for drive mode).\nExample: -e electric",
 )
-@click.option("--avoid-tolls", "-t", is_flag=True, help="Avoid tolls")
-@click.option("--avoid-highways", "-H", is_flag=True, help="Avoid highways")
-@click.option("--with", "-w", "vehicle_alias", help="Use a preset vehicle configuration")
-@click.option("--directions", "-d", is_flag=True, help="Show turn-by-turn directions")
-@click.option("--find", "-F", multiple=True, help="Search for places along the route (e.g. -F gas -F food)")
-@click.option("--weather", "-W", is_flag=True, help="Show weather forecast along the route")
+@click.option(
+    "--avoid-tolls",
+    "-t",
+    is_flag=True,
+    help="Avoid toll roads where possible.",
+)
+@click.option(
+    "--avoid-highways",
+    "-H",
+    is_flag=True,
+    help="Avoid highways (good for scooters/scenic routes).",
+)
+@click.option(
+    "--with",
+    "-w",
+    "vehicle_alias",
+    help="Load settings from a saved vehicle in your garage.\nExample: --with tesla",
+)
+@click.option(
+    "--directions",
+    "-d",
+    is_flag=True,
+    help="Display step-by-step navigation instructions.",
+)
+@click.option(
+    "--find",
+    "-F",
+    multiple=True,
+    help="Search for places along the route path. Can be used multiple times.\nExample: -F gas -F coffee",
+)
+@click.option(
+    "--weather",
+    "-W",
+    is_flag=True,
+    help="Fetch hourly weather forecast for points along the route.",
+)
 def route(
     destination,
     origin,
@@ -134,7 +173,14 @@ def route(
     """
     Calculate a route to DESTINATION.
 
-    DESTINATION and ORIGIN can be saved places (e.g. 'home', 'work') or raw addresses.
+    DESTINATION can be a city ("Los Angeles"), an address ("123 Main St"),
+    or a saved place name ("work").
+
+    
+    Examples:
+      roam "New York"
+      roam "Gym" --origin "Work"
+      roam "Seattle" -W -F "Starbucks"
     """
     if not settings:
         console.print(
@@ -236,40 +282,50 @@ def route(
 
             console.print(f"[bold]Distance:[/bold] {miles:.2f} miles")
             console.print(f"[bold]Duration:[/bold] {fmt_duration}")
-            
+
             # --- Smart Forecast Weather ---
             if weather:
                 console.print("\n[bold]Route Forecast:[/bold]")
                 legs = route_obj.get("legs", [])
-                
+
                 # We want to sample points every ~1 hour (3600s)
-                SAMPLE_INTERVAL = 3600 
-                
+                SAMPLE_INTERVAL = 3600
+
                 current_elapsed = 0
-                last_sample_time = -SAMPLE_INTERVAL # Force sample at 0
-                
-                samples = [] # List of (time_offset, lat, lng, description)
-                
+                last_sample_time = -SAMPLE_INTERVAL  # Force sample at 0
+
+                samples = []  # List of (time_offset, lat, lng, description)
+
                 # Start Point
                 start_loc = legs[0].get("startLocation", {}).get("latLng", {})
                 if start_loc:
-                    samples.append((0, start_loc.get("latitude"), start_loc.get("longitude"), "Start"))
+                    samples.append(
+                        (
+                            0,
+                            start_loc.get("latitude"),
+                            start_loc.get("longitude"),
+                            "Start",
+                        )
+                    )
 
                 # Walk the steps to find intermediate points
                 for leg in legs:
                     for step in leg.get("steps", []):
                         step_dur = get_seconds(step.get("staticDuration", "0s"))
-                        
-                        # Check if we should sample in this step
-                        # Ideally, we sample at the END of the step if it crosses a threshold
-                        # Simple logic: if current_elapsed > last_sample + interval
-                        
+
                         if current_elapsed > last_sample_time + SAMPLE_INTERVAL:
                             end_loc = step.get("endLocation", {}).get("latLng", {})
                             if end_loc:
-                                samples.append((current_elapsed, end_loc.get("latitude"), end_loc.get("longitude"), f"En Route (+{format_duration(str(current_elapsed)+'s')})"))
+                                samples.append(
+                                    (
+                                        current_elapsed,
+                                        end_loc.get("latitude"),
+                                        end_loc.get("longitude"),
+                                        f"En Route (+{format_duration(str(current_elapsed)+'s')})",
+                                    )
+                                )
                                 last_sample_time = current_elapsed
-                        
+
                         current_elapsed += step_dur
 
                 # Destination Point
@@ -278,7 +334,14 @@ def route(
                 if end_loc:
                     # Only add if significant time passed since last sample
                     if total_dur > last_sample_time + (SAMPLE_INTERVAL / 2):
-                        samples.append((total_dur, end_loc.get("latitude"), end_loc.get("longitude"), "Destination"))
+                        samples.append(
+                            (
+                                total_dur,
+                                end_loc.get("latitude"),
+                                end_loc.get("longitude"),
+                                "Destination",
+                            )
+                        )
 
                 # Fetch Forecasts
                 weather_table = Table(box=None)
@@ -286,33 +349,47 @@ def route(
                 weather_table.add_column("Forecast Temp", style="cyan")
                 weather_table.add_column("Condition", style="yellow")
                 weather_table.add_column("Precip %", style="blue")
-                
+
                 now = datetime.now(timezone.utc)
-                
-                with console.status("[bold green]Fetching forecast along route...[/bold green]"):
+
+                with console.status(
+                    "[bold green]Fetching forecast along route...[/bold green]"
+                ):
                     for offset, lat, lng, desc in samples:
                         target_time = now + timedelta(seconds=offset)
-                        
+
                         # Fetch Hourly Forecast
                         forecast_data = requester.get_hourly_forecast(lat, lng)
                         match = find_forecast_for_time(forecast_data, target_time)
-                        
+
                         if match:
                             temp_c = match.get("temperature", {}).get("degrees")
-                            temp_f = (temp_c * 9/5) + 32 if temp_c is not None else None
+                            temp_f = (
+                                (temp_c * 9 / 5) + 32 if temp_c is not None else None
+                            )
                             temp_str = f"{temp_f:.1f}°F" if temp_f else "N/A"
-                            
-                            condition = match.get("weatherCondition", {}).get("description", {}).get("text", "Unknown")
-                            precip = match.get("precipitation", {}).get("probability", {}).get("percent", 0)
-                            
+
+                            condition = (
+                                match.get("weatherCondition", {})
+                                .get("description", {})
+                                .get("text", "Unknown")
+                            )
+                            precip = (
+                                match.get("precipitation", {})
+                                .get("probability", {})
+                                .get("percent", 0)
+                            )
+
                             # Format time label
                             local_time_str = target_time.strftime("%I:%M %p")
                             label = f"{desc}\n[dim]{local_time_str}[/dim]"
-                            
-                            weather_table.add_row(label, temp_str, condition, f"{precip}%")
+
+                            weather_table.add_row(
+                                label, temp_str, condition, f"{precip}%"
+                            )
                         else:
                             weather_table.add_row(desc, "No Data", "-", "-")
-                
+
                 console.print(weather_table)
 
             # --- Search Along Route ---
@@ -321,21 +398,24 @@ def route(
                 for query in find:
                     console.print(f"  [dim]Searching for '{query}'...[/dim]")
                     places = requester.search_along_route(query, encoded_polyline)
-                    
+
                     if places:
-                        table = Table(title=f"{query.capitalize()} Stops", show_header=True, header_style="bold magenta")
+                        table = Table(
+                            title=f"{query.capitalize()} Stops",
+                            show_header=True,
+                            header_style="bold magenta",
+                        )
                         table.add_column("Name", style="cyan")
                         table.add_column("Address", style="white")
-                        
+
                         for place in places[:5]:
                             name = place.get("displayName", {}).get("text", "Unknown")
                             addr = place.get("formattedAddress", "Unknown Address")
                             table.add_row(name, addr)
-                        
+
                         console.print(table)
                     else:
                         console.print(f"  [yellow]No '{query}' found along route.[/yellow]")
-
 
             if directions:
                 console.print("\n[bold]Directions:[/bold]")
@@ -346,7 +426,7 @@ def route(
                         nav = step.get("navigationInstruction", {})
                         text = nav.get("instructions", "")
                         maneuver = nav.get("maneuver", "").replace("_", " ").title()
-                        
+
                         step_dist_meters = int(step.get("distanceMeters", 0))
                         step_miles = step_dist_meters * 0.000621371
                         step_dist_str = (

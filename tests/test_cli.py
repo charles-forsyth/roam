@@ -10,7 +10,7 @@ def test_cli_help():
 
     result_route = runner.invoke(cli, ["route", "--help"])
     assert result_route.exit_code == 0
-    assert "turn-by-turn directions" in result_route.output
+    assert "step-by-step navigation instructions" in result_route.output
 
 
 def test_format_duration():
