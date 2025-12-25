@@ -79,6 +79,7 @@ def format_duration(seconds_str):
 @click.option("--with", "-w", "vehicle_alias", help="Use a preset vehicle configuration")
 @click.option("--directions", "-d", is_flag=True, help="Show turn-by-turn directions")
 @click.option("--find", "-F", multiple=True, help="Search for places along the route (e.g. -F gas -F food)")
+@click.option("--weather", "-W", is_flag=True, help="Show weather at start and destination")
 def route(
     destination,
     origin,
@@ -89,6 +90,7 @@ def route(
     vehicle_alias,
     directions,
     find,
+    weather,
 ):
     """
     Calculate a route to DESTINATION.
@@ -203,6 +205,41 @@ def route(
             console.print(f"[bold]Distance:[/bold] {miles:.2f} miles")
             console.print(f"[bold]Duration:[/bold] {fmt_duration}")
             
+            # --- Weather ---
+            if weather:
+                console.print("\n[bold]Weather Conditions:[/bold]")
+                legs = route_obj.get("legs", [])
+                if legs:
+                    # Get Start Location
+                    start = legs[0].get("startLocation", {}).get("latLng", {})
+                    # Get End Location
+                    end = legs[-1].get("endLocation", {}).get("latLng", {})
+                    
+                    points = [("Start", start), ("Destination", end)]
+                    
+                    weather_table = Table(box=None)
+                    weather_table.add_column("Location", style="bold")
+                    weather_table.add_column("Temp", style="cyan")
+                    weather_table.add_column("Condition", style="yellow")
+                    weather_table.add_column("Humidity", style="blue")
+                    
+                    for label, loc in points:
+                        lat, lng = loc.get("latitude"), loc.get("longitude")
+                        if lat and lng:
+                            w_data = requester.get_weather(lat, lng)
+                            current = w_data.get("currentConditions", {})
+                            temp_c = current.get("temperature", {}).get("value")
+                            temp_f = (temp_c * 9/5) + 32 if temp_c is not None else "N/A"
+                            
+                            condition = current.get("weatherDescription", "Unknown")
+                            humidity = current.get("relativeHumidity", "N/A")
+                            
+                            temp_str = f"{temp_f:.1f}°F" if isinstance(temp_f, float) else "N/A"
+                            
+                            weather_table.add_row(label, temp_str, condition, f"{humidity}%")
+                    
+                    console.print(weather_table)
+
             # --- Search Along Route ---
             if find and encoded_polyline:
                 console.print("\n[bold]Highlights Along Route:[/bold]")
@@ -251,9 +288,9 @@ def route(
                             f"{step_count}. [cyan]{text}[/cyan] ([dim]{step_dist_str}[/dim])"
                         )
                         step_count += 1
-            elif not find:
+            elif not find and not weather:
                 console.print(
-                    "\n[dim]Use --directions (-d) for steps, or --find (-F) query to search along route.[/dim]"
+                    "\n[dim]Use -d for steps, -F for places, -W for weather.[/dim]"
                 )
 
         else:
