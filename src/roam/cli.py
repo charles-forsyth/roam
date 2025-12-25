@@ -78,6 +78,7 @@ def format_duration(seconds_str):
 @click.option("--avoid-highways", "-H", is_flag=True, help="Avoid highways")
 @click.option("--with", "-w", "vehicle_alias", help="Use a preset vehicle configuration")
 @click.option("--directions", "-d", is_flag=True, help="Show turn-by-turn directions")
+@click.option("--find", "-F", multiple=True, help="Search for places along the route (e.g. -F gas -F food)")
 def route(
     destination,
     origin,
@@ -87,6 +88,7 @@ def route(
     avoid_highways,
     vehicle_alias,
     directions,
+    find,
 ):
     """
     Calculate a route to DESTINATION.
@@ -189,9 +191,10 @@ def route(
     if result:
         routes = result.get("routes", [])
         if routes:
-            route = routes[0]
-            duration = route.get("duration", "N/A")
-            distance = route.get("distanceMeters", 0)
+            route_obj = routes[0]
+            duration = route_obj.get("duration", "N/A")
+            distance = route_obj.get("distanceMeters", 0)
+            encoded_polyline = route_obj.get("polyline", {}).get("encodedPolyline", "")
             miles = int(distance) * 0.000621371
 
             # Format time
@@ -199,29 +202,40 @@ def route(
 
             console.print(f"[bold]Distance:[/bold] {miles:.2f} miles")
             console.print(f"[bold]Duration:[/bold] {fmt_duration}")
+            
+            # --- Search Along Route ---
+            if find and encoded_polyline:
+                console.print("\n[bold]Highlights Along Route:[/bold]")
+                for query in find:
+                    console.print(f"  [dim]Searching for '{query}'...[/dim]")
+                    places = requester.search_along_route(query, encoded_polyline)
+                    
+                    if places:
+                        table = Table(title=f"{query.capitalize()} Stops", show_header=True, header_style="bold magenta")
+                        table.add_column("Name", style="cyan")
+                        table.add_column("Address", style="white")
+                        
+                        # Limit to top 5 results per query to avoid spam
+                        for place in places[:5]:
+                            name = place.get("displayName", {}).get("text", "Unknown")
+                            addr = place.get("formattedAddress", "Unknown Address")
+                            table.add_row(name, addr)
+                        
+                        console.print(table)
+                    else:
+                        console.print(f"  [yellow]No '{query}' found along route.[/yellow]")
+
 
             if directions:
                 console.print("\n[bold]Directions:[/bold]")
-                legs = route.get("legs", [])
+                legs = route_obj.get("legs", [])
                 step_count = 1
                 for leg in legs:
                     for step in leg.get("steps", []):
-                        # Some steps might not have maneuver but have generic instructions if we parsed HTML (legacy)
-                        # Routes API v2 returns mostly maneuvers or nothing for simple steps.
-                        # Actually, Routes API v2 field 'navigationInstruction' is sparse.
-                        # Let's check for 'instructions' or 'maneuver'.
-
-                        # API v2 often puts the text in `navigationInstruction`.`instructions`?
-                        # No, the field mask requested `navigationInstruction`.
-                        # Let's inspect what we get. The API returns `maneuver` (enum) and `instructions` (string).
-
-                        # Note: The API documentation says `navigationInstruction` has `maneuver` and `instructions`.
-                        # `instructions` is the user-readable text.
-
                         nav = step.get("navigationInstruction", {})
                         text = nav.get("instructions", "")
                         maneuver = nav.get("maneuver", "").replace("_", " ").title()
-
+                        
                         step_dist_meters = int(step.get("distanceMeters", 0))
                         step_miles = step_dist_meters * 0.000621371
                         step_dist_str = (
@@ -237,9 +251,9 @@ def route(
                             f"{step_count}. [cyan]{text}[/cyan] ([dim]{step_dist_str}[/dim])"
                         )
                         step_count += 1
-            else:
+            elif not find:
                 console.print(
-                    "\n[dim]Use --directions to see turn-by-turn steps.[/dim]"
+                    "\n[dim]Use --directions (-d) for steps, or --find (-F) query to search along route.[/dim]"
                 )
 
         else:
