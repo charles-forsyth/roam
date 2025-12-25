@@ -7,6 +7,7 @@ from roam.core import RouteRequester
 from roam.utils import haversine_distance
 from datetime import datetime, timedelta, timezone
 import sys
+import urllib.parse
 
 console = Console(record=True)
 
@@ -82,6 +83,7 @@ def format_price_level(level):
         "PRICE_LEVEL_VERY_EXPENSIVE": "$$$$",
     }
     return mapping.get(level, level) if level else "-"
+
 def get_fuel_price(place):
     """Extracts Regular Unleaded price if available."""
     fuel_options = place.get("fuelOptions", {})
@@ -129,6 +131,27 @@ def find_forecast_for_time(forecast_data, target_time):
             continue
 
     return closest
+
+def generate_maps_url(origin, destination, mode):
+    """Generates a Universal Google Maps URL."""
+    base = "https://www.google.com/maps/dir/?api=1"
+    
+    # Map roam modes to Google Maps travelmode
+    mode_map = {
+        "drive": "driving",
+        "bicycle": "bicycling",
+        "two_wheeler": "driving", # Maps URL doesn't support 2-wheeler mode explicitly
+        "transit": "transit",
+        "walk": "walking"
+    }
+    
+    params = {
+        "origin": origin,
+        "destination": destination,
+        "travelmode": mode_map.get(mode, "driving")
+    }
+    
+    return f"{base}&{urllib.parse.urlencode(params)}"
 
 
 @cli.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -188,6 +211,17 @@ def find_forecast_for_time(forecast_data, target_time):
     is_flag=True,
     help="Fetch hourly weather forecast for points along the route.",
 )
+@click.option(
+    "--url",
+    "-u",
+    is_flag=True,
+    help="Generate a Google Maps URL for this route.",
+)
+@click.option(
+    "--html",
+    is_flag=True,
+    help="Export the route report to 'roam_report.html'.",
+)
 def route(
     destination,
     origin,
@@ -199,6 +233,8 @@ def route(
     directions,
     find,
     weather,
+    url,
+    html,
 ):
     """
     Calculate a route to DESTINATION.
@@ -518,6 +554,15 @@ def route(
                 console.print(
                     "\n[dim]Use -d for steps, -F for places, -W for weather.[/dim]"
                 )
+            
+            # --- Output & Sharing ---
+            if url:
+                maps_url = generate_maps_url(final_origin, final_dest, final_mode)
+                console.print(f"\n[bold green]Open in Maps:[/bold green] {maps_url}")
+            
+            if html:
+                console.save_html("roam_report.html")
+                console.print("\n[bold]Report saved to:[/bold] roam_report.html")
 
         else:
             console.print("[yellow]No routes found.[/yellow]")
