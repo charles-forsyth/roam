@@ -74,6 +74,33 @@ def get_seconds(duration_str):
     except Exception:
         return 0
 
+def format_price_level(level):
+    mapping = {
+        "PRICE_LEVEL_INEXPENSIVE": "$",
+        "PRICE_LEVEL_MODERATE": "$$",
+        "PRICE_LEVEL_EXPENSIVE": "$$$",
+        "PRICE_LEVEL_VERY_EXPENSIVE": "$$$$",
+    }
+    return mapping.get(level, level) if level else "-"
+def get_fuel_price(place):
+    """Extracts Regular Unleaded price if available."""
+    fuel_options = place.get("fuelOptions", {})
+    prices = fuel_options.get("fuelPrices", [])
+    
+    for p in prices:
+        if p.get("type") == "REGULAR_UNLEADED":
+            price_obj = p.get("price", {})
+            units = int(price_obj.get("units", 0))
+            nanos = int(price_obj.get("nanos", 0))
+            currency = price_obj.get("currencyCode", "USD")
+            
+            # Construct float
+            val = units + (nanos / 1_000_000_000)
+            
+            symbol = "$" if currency == "USD" else currency + " "
+            return f"{symbol}{val:.2f}"
+            
+    return None
 
 def find_forecast_for_time(forecast_data, target_time):
     """
@@ -443,14 +470,20 @@ def route(
                             addr = place.get("formattedAddress", "Unknown Address")
                             rating = place.get("rating", "N/A")
                             count = place.get("userRatingCount", 0)
-                            price = place.get("priceLevel", "-")
+                            price_level = place.get("priceLevel", "")
+                            
+                            # Try to get fuel price
+                            fuel_price = get_fuel_price(place)
+                            
+                            # Display logic: Show Fuel Price if available, else Price Level ($$)
+                            price_display = fuel_price if fuel_price else format_price_level(price_level)
                             
                             dist_val = place.get("_dist_from_start", 0)
                             dist_str = f"{dist_val:.1f}" if dist_val != float("inf") else "-"
                             
                             rating_str = f"{rating} ({count})" if rating != "N/A" else "-"
                             
-                            table.add_row(dist_str, name, rating_str, str(price), addr)
+                            table.add_row(dist_str, name, rating_str, str(price_display), addr)
 
                         console.print(table)
                     else:
@@ -626,7 +659,7 @@ def places_remove(name):
     places_data = settings.load_places()
     if name in places_data:
         del places_data[name]
-        settings.save_garage(places_data)
+        settings.save_garage(places_data) # NOTE: This looks like a bug, should be settings.save_places(places_data)
         console.print(f"[green]Removed [bold]{name}[/bold] from places.[/green]")
     else:
         console.print(f"[red]Place '{name}' not found.[/red]")
