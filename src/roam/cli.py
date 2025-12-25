@@ -8,7 +8,7 @@ from roam.utils import haversine_distance
 from datetime import datetime, timedelta, timezone
 import sys
 
-console = Console()
+console = Console(record=True)
 
 
 class DefaultGroup(click.Group):
@@ -659,7 +659,7 @@ def places_remove(name):
     places_data = settings.load_places()
     if name in places_data:
         del places_data[name]
-        settings.save_garage(places_data) # NOTE: This looks like a bug, should be settings.save_places(places_data)
+        settings.save_places(places_data)
         console.print(f"[green]Removed [bold]{name}[/bold] from places.[/green]")
     else:
         console.print(f"[red]Place '{name}' not found.[/red]")
