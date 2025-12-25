@@ -2,6 +2,7 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.terminal_theme import MONOKAI
 from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
 from roam.utils import haversine_distance
@@ -561,7 +562,7 @@ def route(
                 console.print(f"\n[bold green]Open in Maps:[/bold green] {maps_url}")
             
             if html:
-                console.save_html("roam_report.html")
+                console.save_html("roam_report.html", theme=MONOKAI)
                 console.print("\n[bold]Report saved to:[/bold] roam_report.html")
 
         else:
