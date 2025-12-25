@@ -1,0 +1,33 @@
+[project]
+name = "roam"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Chuck", email = "charles.forsyth@ucr.edu" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.3.1",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "python-dotenv>=1.2.1",
+    "requests>=2.32.5",
+    "rich>=14.2.0",
+]
+
+[project.scripts]
+roam = "roam.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.10,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.14.10",
+    "types-requests>=2.32.4.20250913",
+]
