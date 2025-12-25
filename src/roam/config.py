@@ -4,6 +4,7 @@ from pydantic import Field, BaseModel
 from typing import Dict, Optional
 import json
 
+
 class VehicleConfig(BaseModel):
     mode: str
     engine: Optional[str] = None
@@ -11,19 +12,22 @@ class VehicleConfig(BaseModel):
     avoid_highways: bool = False
     avoid_ferries: bool = False
 
+
 class Settings(BaseSettings):
     """
     Application settings loaded from environment variables and .env files.
     """
+
     google_maps_api_key: str = Field(..., description="Google Maps Platform API Key")
-    
+
     # Garage/Fleet config path (defaulting to user config dir)
-    config_dir: Path = Field(default=Path.home() / ".config" / "roam", description="Directory for local config")
-    
+    config_dir: Path = Field(
+        default=Path.home() / ".config" / "roam",
+        description="Directory for local config",
+    )
+
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore"
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
     @property
@@ -65,8 +69,9 @@ class Settings(BaseSettings):
         self.ensure_config_dir()
         self.places_config_path.write_text(json.dumps(places, indent=2))
 
+
 # Global settings instance
 try:
     settings = Settings()
 except Exception:
-    settings = None # type: ignore
+    settings = None  # type: ignore
