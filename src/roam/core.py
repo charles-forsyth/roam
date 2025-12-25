@@ -79,7 +79,7 @@ class RouteRequester:
         
         # We request name, formatting address, and location
         headers = {
-            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.fuelOptions,places.routingSummaries,nextPageToken"
+            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.fuelOptions,nextPageToken"
         }
 
         # Max 3 pages (default 20 per page = 60 results) to avoid excessive API usage

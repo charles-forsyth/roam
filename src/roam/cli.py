@@ -4,7 +4,7 @@ from rich.panel import Panel
 from rich.table import Table
 from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
-from roam.utils import decode_polyline, min_distance_to_polyline
+from roam.utils import decode_polyline, get_nearest_point_on_polyline, calculate_cumulative_distances
 from datetime import datetime, timedelta, timezone
 import sys
 import urllib.parse
@@ -472,48 +472,45 @@ def route(
                 # Decode polyline once for Detour calculation
                 route_points = decode_polyline(encoded_polyline)
                 
+                # Pre-calculate distances for Trip Mile
+                cumulative_distances = calculate_cumulative_distances(route_points)
+                
                 for query in find:
                     console.print(f"  [dim]Searching for '{query}'...[/dim]")
-                    # Pass origin for routingSummaries
-                    places_list = requester.search_along_route(query, encoded_polyline, start_lat, start_lng)
+                    # We no longer pass origin/routingParams because we calculate trip mile manually
+                    places_list = requester.search_along_route(query, encoded_polyline)
 
                     if places_list:
                         # ENRICHMENT
                         for place in places_list:
-                            # 1. Trip Mile (Driving Distance from Start)
-                            # routingSummaries field: routingSummaries[].legs[].distanceMeters
-                            # We requested routingParameters with origin, so this should exist.
-                            
-                            trip_meters = float("inf")
-                            summaries = place.get("routingSummaries", [])
-                            if summaries:
-                                # We assume the first summary is the one we asked for (from origin)
-                                leg_dist = summaries[0].get("legs", [])[0].get("distanceMeters", 0)
-                                trip_meters = int(leg_dist)
-                            
-                            place["_trip_meters"] = trip_meters
-                            place["_trip_mile"] = trip_meters * 0.000621371
-                            
-                            # 2. Detour Distance (Haversine to Polyline)
+                            # 1. Detour Distance & 2. Trip Mile
                             loc = place.get("location", {})
                             lat = loc.get("latitude")
                             lng = loc.get("longitude")
                             
                             if lat and lng:
-                                # This math is expensive for 60 places x 5000 points.
-                                # But let's try it. If it's too slow, we optimize.
-                                # Optimization: Only check every 10th point?
-                                # min_distance_to_polyline iterates.
+                                # Subsample points for finding nearest point speed
+                                # NOTE: If we subsample, we must map index back to original index for cumulative_distances
                                 
-                                # Let's subsample points for speed (every 10th point)
-                                sub_points = route_points[::10]
-                                detour_mi = min_distance_to_polyline(lat, lng, sub_points)
+                                # Simple optimization: Check every 5th point
+                                STEP = 5
+                                sub_points = route_points[::STEP]
+                                
+                                detour_mi, sub_index = get_nearest_point_on_polyline(lat, lng, sub_points)
+                                
+                                # Map sub_index to real index
+                                real_index = sub_index * STEP
+                                if real_index >= len(cumulative_distances):
+                                    real_index = len(cumulative_distances) - 1
+                                
                                 place["_detour_mi"] = detour_mi
+                                place["_trip_mi"] = cumulative_distances[real_index]
                             else:
                                 place["_detour_mi"] = float("inf")
+                                place["_trip_mi"] = float("inf")
 
                         # SORT LOGIC (Sort by Trip Mile)
-                        places_list.sort(key=lambda x: x["_trip_meters"])
+                        places_list.sort(key=lambda x: x["_trip_mi"])
 
                         table = Table(
                             title=f"{query.capitalize()} Stops (Trip Order)",
@@ -539,7 +536,7 @@ def route(
                             price_display = fuel_price if fuel_price else format_price_level(price_level)
                             
                             # Trip Mile
-                            trip_mi = place.get("_trip_mile", float("inf"))
+                            trip_mi = place.get("_trip_mi", float("inf"))
                             trip_str = f"{trip_mi:.1f} mi" if trip_mi != float("inf") else "-"
                             
                             # Detour
