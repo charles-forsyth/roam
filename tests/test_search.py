@@ -74,10 +74,10 @@ def test_get_hourly_forecast_mock(mocker):
 
 def test_find_forecast_for_time():
     data = {
-        "hourlyForecasts": [
-            {"forecastTime": "2025-12-25T10:00:00Z", "temp": 10},
-            {"forecastTime": "2025-12-25T11:00:00Z", "temp": 11},
-            {"forecastTime": "2025-12-25T12:00:00Z", "temp": 12},
+        "forecastHours": [
+            {"interval": {"startTime": "2025-12-25T10:00:00Z"}, "temp": 10},
+            {"interval": {"startTime": "2025-12-25T11:00:00Z"}, "temp": 11},
+            {"interval": {"startTime": "2025-12-25T12:00:00Z"}, "temp": 12},
         ]
     }
     

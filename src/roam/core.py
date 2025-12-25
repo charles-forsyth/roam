@@ -11,7 +11,7 @@ class RouteRequester:
     ROUTES_BASE_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
     PLACES_BASE_URL = "https://places.googleapis.com/v1/places:searchText"
     WEATHER_BASE_URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
-    FORECAST_BASE_URL = "https://weather.googleapis.com/v1/forecast:hourly"
+    FORECAST_BASE_URL = "https://weather.googleapis.com/v1/forecast/hours:lookup"
 
     def __init__(self, api_key: str):
         self.api_key = api_key
