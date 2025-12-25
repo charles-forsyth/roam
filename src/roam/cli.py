@@ -2,10 +2,9 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.terminal_theme import MONOKAI
 from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
-from roam.utils import haversine_distance
+from roam.utils import decode_polyline, min_distance_to_polyline
 from datetime import datetime, timedelta, timezone
 import sys
 import urllib.parse
@@ -469,33 +468,60 @@ def route(
             # --- Search Along Route ---
             if find and encoded_polyline:
                 console.print("\n[bold]Highlights Along Route:[/bold]")
+                
+                # Decode polyline once for Detour calculation
+                route_points = decode_polyline(encoded_polyline)
+                
                 for query in find:
                     console.print(f"  [dim]Searching for '{query}'...[/dim]")
-                    places_list = requester.search_along_route(query, encoded_polyline)
+                    # Pass origin for routingSummaries
+                    places_list = requester.search_along_route(query, encoded_polyline, start_lat, start_lng)
 
                     if places_list:
-                        # SORT LOGIC
-                        if start_lat and start_lng:
-                            # Decorate with distance
-                            for place in places_list:
-                                loc = place.get("location", {})
-                                lat = loc.get("latitude")
-                                lng = loc.get("longitude")
-                                if lat and lng:
-                                    dist = haversine_distance(start_lat, start_lng, lat, lng)
-                                    place["_dist_from_start"] = dist
-                                else:
-                                    place["_dist_from_start"] = float("inf")
+                        # ENRICHMENT
+                        for place in places_list:
+                            # 1. Trip Mile (Driving Distance from Start)
+                            # routingSummaries field: routingSummaries[].legs[].distanceMeters
+                            # We requested routingParameters with origin, so this should exist.
                             
-                            # Sort
-                            places_list.sort(key=lambda x: x["_dist_from_start"])
+                            trip_meters = float("inf")
+                            summaries = place.get("routingSummaries", [])
+                            if summaries:
+                                # We assume the first summary is the one we asked for (from origin)
+                                leg_dist = summaries[0].get("legs", [])[0].get("distanceMeters", 0)
+                                trip_meters = int(leg_dist)
+                            
+                            place["_trip_meters"] = trip_meters
+                            place["_trip_mile"] = trip_meters * 0.000621371
+                            
+                            # 2. Detour Distance (Haversine to Polyline)
+                            loc = place.get("location", {})
+                            lat = loc.get("latitude")
+                            lng = loc.get("longitude")
+                            
+                            if lat and lng:
+                                # This math is expensive for 60 places x 5000 points.
+                                # But let's try it. If it's too slow, we optimize.
+                                # Optimization: Only check every 10th point?
+                                # min_distance_to_polyline iterates.
+                                
+                                # Let's subsample points for speed (every 10th point)
+                                sub_points = route_points[::10]
+                                detour_mi = min_distance_to_polyline(lat, lng, sub_points)
+                                place["_detour_mi"] = detour_mi
+                            else:
+                                place["_detour_mi"] = float("inf")
+
+                        # SORT LOGIC (Sort by Trip Mile)
+                        places_list.sort(key=lambda x: x["_trip_meters"])
 
                         table = Table(
                             title=f"{query.capitalize()} Stops (Trip Order)",
                             show_header=True,
                             header_style="bold magenta",
                         )
-                        table.add_column("Dist (mi)", style="dim")
+                        table.add_column("Trip Mile", style="dim")
+                        table.add_column("Detour", style="red")
                         table.add_column("Name", style="cyan")
                         table.add_column("Rating", style="yellow")
                         table.add_column("Price", style="green")
@@ -509,18 +535,20 @@ def route(
                             count = place.get("userRatingCount", 0)
                             price_level = place.get("priceLevel", "")
                             
-                            # Try to get fuel price
                             fuel_price = get_fuel_price(place)
-                            
-                            # Display logic: Show Fuel Price if available, else Price Level ($$)
                             price_display = fuel_price if fuel_price else format_price_level(price_level)
                             
-                            dist_val = place.get("_dist_from_start", 0)
-                            dist_str = f"{dist_val:.1f}" if dist_val != float("inf") else "-"
+                            # Trip Mile
+                            trip_mi = place.get("_trip_mile", float("inf"))
+                            trip_str = f"{trip_mi:.1f} mi" if trip_mi != float("inf") else "-"
+                            
+                            # Detour
+                            detour_mi = place.get("_detour_mi", float("inf"))
+                            detour_str = f"+{detour_mi:.1f} mi" if detour_mi != float("inf") else "-"
                             
                             rating_str = f"{rating} ({count})" if rating != "N/A" else "-"
                             
-                            table.add_row(dist_str, name, rating_str, str(price_display), addr)
+                            table.add_row(trip_str, detour_str, name, rating_str, str(price_display), addr)
 
                         console.print(table)
                     else:
@@ -562,6 +590,7 @@ def route(
                 console.print(f"\n[bold green]Open in Maps:[/bold green] {maps_url}")
             
             if html:
+                from rich.terminal_theme import MONOKAI
                 console.save_html("roam_report.html", theme=MONOKAI)
                 console.print("\n[bold]Report saved to:[/bold] roam_report.html")
 

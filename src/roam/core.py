@@ -69,7 +69,7 @@ class RouteRequester:
                 console.print(f"[red]Details:[/red] {e.response.text}")
             return {}
 
-    def search_along_route(self, query: str, polyline: str) -> List[Dict[str, Any]]:
+    def search_along_route(self, query: str, polyline: str, origin_lat: Optional[float] = None, origin_lng: Optional[float] = None) -> List[Dict[str, Any]]:
         """
         Searches for places along the route polyline using Places API (New).
         Handles pagination to retrieve up to 60 results (approx).
@@ -79,7 +79,7 @@ class RouteRequester:
         
         # We request name, formatting address, and location
         headers = {
-            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.fuelOptions,nextPageToken"
+            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.fuelOptions,places.routingSummaries,nextPageToken"
         }
 
         # Max 3 pages (default 20 per page = 60 results) to avoid excessive API usage
@@ -92,6 +92,15 @@ class RouteRequester:
                     }
                 }
             }
+            
+            # If origin is provided, request routing summaries
+            if origin_lat is not None and origin_lng is not None:
+                payload["routingParameters"] = {
+                    "origin": {
+                        "latitude": origin_lat,
+                        "longitude": origin_lng
+                    }
+                }
             
             if next_page_token:
                 payload["pageToken"] = next_page_token
