@@ -35,19 +35,23 @@ def test_get_weather_mock(mocker):
     
     mock_response = mocker.Mock()
     mock_response.status_code = 200
+    # Mock the REAL structure from Weather API
     mock_response.json.return_value = {
-        "currentConditions": {
-            "temperature": {"value": 20},
-            "weatherDescription": "Sunny",
-            "relativeHumidity": 50
-        }
+        "temperature": {"degrees": 20},
+        "weatherCondition": {
+            "description": {"text": "Sunny"}
+        },
+        "relativeHumidity": 50
     }
     mock_get.return_value = mock_response
     
     requester = RouteRequester(api_key="fake_key")
     weather = requester.get_weather(37.77, -122.41)
     
-    assert weather["currentConditions"]["weatherDescription"] == "Sunny"
-    assert weather["currentConditions"]["temperature"]["value"] == 20
+    assert weather["weatherCondition"]["description"]["text"] == "Sunny"
+    assert weather["temperature"]["degrees"] == 20
     
-    mock_get.assert_called_once()
+    # Verify params
+    args, kwargs = mock_get.call_args
+    assert kwargs["params"]["location.latitude"] == 37.77
+    assert kwargs["params"]["location.longitude"] == -122.41
