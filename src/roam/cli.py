@@ -227,12 +227,13 @@ def route(
                         lat, lng = loc.get("latitude"), loc.get("longitude")
                         if lat and lng:
                             w_data = requester.get_weather(lat, lng)
-                            current = w_data.get("currentConditions", {})
-                            temp_c = current.get("temperature", {}).get("value")
+                            # w_data is the current conditions object directly
+                            
+                            temp_c = w_data.get("temperature", {}).get("degrees")
                             temp_f = (temp_c * 9/5) + 32 if temp_c is not None else "N/A"
                             
-                            condition = current.get("weatherDescription", "Unknown")
-                            humidity = current.get("relativeHumidity", "N/A")
+                            condition = w_data.get("weatherCondition", {}).get("description", {}).get("text", "Unknown")
+                            humidity = w_data.get("relativeHumidity", "N/A")
                             
                             temp_str = f"{temp_f:.1f}°F" if isinstance(temp_f, float) else "N/A"
                             

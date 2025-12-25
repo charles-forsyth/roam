@@ -103,7 +103,8 @@ class RouteRequester:
         """
         # The Weather API uses GET requests with query parameters
         params = {
-            "location": f"{lat},{lng}",
+            "location.latitude": lat,
+            "location.longitude": lng,
             "key": self.api_key # Weather API might require key in params for GET
         }
         
@@ -123,6 +124,9 @@ class RouteRequester:
             response = requests.get(self.WEATHER_BASE_URL, params=params, timeout=5)
             response.raise_for_status()
             return response.json()
-        except requests.exceptions.RequestException:
+        except requests.exceptions.RequestException as e:
             # Don't print error here to avoid spamming if weather fails for one point
+            console.print(f"[red]Weather API Error:[/red] {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                console.print(f"[red]Details:[/red] {e.response.text}")
             return {}
