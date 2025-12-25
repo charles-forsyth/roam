@@ -11,6 +11,8 @@ Roam is a CLI tool designed to generate the perfect route for **your specific ve
 *   **🧭 Smart Routing:** Supports `drive`, `bicycle`, `two_wheeler`, `transit`, and `walk`.
 *   **🔋 Eco-Aware:** Optimizes for engine type (`gasoline`, `electric`, `hybrid`, `diesel`).
 *   **🗣️ Turn-by-Turn:** Get detailed directions directly in your terminal.
+*   **🔍 Search Along Route:** Find "gas", "coffee", or "EV charging" without leaving your path.
+*   **☀️ Weather Aware:** Check current conditions at your origin and destination.
 
 ## Installation
 
@@ -22,7 +24,10 @@ uv tool install git+https://github.com/charles-forsyth/roam.git
 
 ## Configuration
 
-1.  **Get a Google Maps API Key**: Ensure the **Routes API** is enabled.
+1.  **Get a Google Maps API Key**: Ensure the following APIs are enabled:
+    *   **Routes API**
+    *   **Places API (New)**
+    *   **Weather API** (optional, for weather features)
 2.  **Set the Key**:
     *   Create `~/.config/roam/.env` and add: `GOOGLE_MAPS_API_KEY=your_key_here`
     *   OR export it: `export GOOGLE_MAPS_API_KEY=your_key_here`
@@ -37,11 +42,20 @@ roam "Los Angeles"
 # With a saved place and preset vehicle
 roam work --with tesla
 
-# Custom ad-hoc routing
-roam "San Francisco" --mode two_wheeler --avoid-highways
+# Custom ad-hoc routing with shortcuts
+roam "San Francisco" -m two_wheeler -H
 
 # Turn-by-turn directions
-roam "Home" --directions
+roam "Home" -d
+```
+
+### 🔍 Search & Weather
+```bash
+# Find places along the route
+roam "Las Vegas" -F "gas" -F "mcdonalds"
+
+# Check weather conditions
+roam "Seattle" -W
 ```
 
 ### 🏎️ Managing Your Garage
