@@ -406,13 +406,24 @@ def route(
                             header_style="bold magenta",
                         )
                         table.add_column("Name", style="cyan")
+                        table.add_column("Rating", style="yellow")
+                        table.add_column("Price", style="green")
                         table.add_column("Address", style="white")
 
                         # Show all results
                         for place in places:
                             name = place.get("displayName", {}).get("text", "Unknown")
                             addr = place.get("formattedAddress", "Unknown Address")
-                            table.add_row(name, addr)
+                            rating = place.get("rating", "N/A")
+                            count = place.get("userRatingCount", 0)
+                            price = place.get("priceLevel", "-")
+                            
+                            # Convert Price Enum if needed (PRICE_LEVEL_MODERATE etc)
+                            # Assuming raw string or int for now
+                            
+                            rating_str = f"{rating} ({count})" if rating != "N/A" else "-"
+                            
+                            table.add_row(name, rating_str, str(price), addr)
 
                         console.print(table)
                     else:
