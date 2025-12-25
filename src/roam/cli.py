@@ -4,6 +4,7 @@ from rich.panel import Panel
 from rich.table import Table
 from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
+from roam.utils import haversine_distance
 from datetime import datetime, timedelta, timezone
 import sys
 
@@ -66,11 +67,13 @@ def format_duration(seconds_str):
     except Exception:
         return seconds_str
 
+
 def get_seconds(duration_str):
     try:
         return int(duration_str.replace("s", ""))
     except Exception:
         return 0
+
 
 def find_forecast_for_time(forecast_data, target_time):
     """
@@ -283,11 +286,19 @@ def route(
             console.print(f"[bold]Distance:[/bold] {miles:.2f} miles")
             console.print(f"[bold]Duration:[/bold] {fmt_duration}")
 
+            # Get Start Location for Distance Sorting
+            legs = route_obj.get("legs", [])
+            start_lat = None
+            start_lng = None
+            if legs:
+                start_loc = legs[0].get("startLocation", {}).get("latLng", {})
+                start_lat = start_loc.get("latitude")
+                start_lng = start_loc.get("longitude")
+
             # --- Smart Forecast Weather ---
             if weather:
                 console.print("\n[bold]Route Forecast:[/bold]")
-                legs = route_obj.get("legs", [])
-
+                
                 # We want to sample points every ~1 hour (3600s)
                 SAMPLE_INTERVAL = 3600
 
@@ -297,13 +308,12 @@ def route(
                 samples = []  # List of (time_offset, lat, lng, description)
 
                 # Start Point
-                start_loc = legs[0].get("startLocation", {}).get("latLng", {})
-                if start_loc:
+                if start_lat:
                     samples.append(
                         (
                             0,
-                            start_loc.get("latitude"),
-                            start_loc.get("longitude"),
+                            start_lat,
+                            start_lng,
                             "Start",
                         )
                     )
@@ -397,33 +407,50 @@ def route(
                 console.print("\n[bold]Highlights Along Route:[/bold]")
                 for query in find:
                     console.print(f"  [dim]Searching for '{query}'...[/dim]")
-                    places = requester.search_along_route(query, encoded_polyline)
+                    places_list = requester.search_along_route(query, encoded_polyline)
 
-                    if places:
+                    if places_list:
+                        # SORT LOGIC
+                        if start_lat and start_lng:
+                            # Decorate with distance
+                            for place in places_list:
+                                loc = place.get("location", {})
+                                lat = loc.get("latitude")
+                                lng = loc.get("longitude")
+                                if lat and lng:
+                                    dist = haversine_distance(start_lat, start_lng, lat, lng)
+                                    place["_dist_from_start"] = dist
+                                else:
+                                    place["_dist_from_start"] = float("inf")
+                            
+                            # Sort
+                            places_list.sort(key=lambda x: x["_dist_from_start"])
+
                         table = Table(
-                            title=f"{query.capitalize()} Stops",
+                            title=f"{query.capitalize()} Stops (Trip Order)",
                             show_header=True,
                             header_style="bold magenta",
                         )
+                        table.add_column("Dist (mi)", style="dim")
                         table.add_column("Name", style="cyan")
                         table.add_column("Rating", style="yellow")
                         table.add_column("Price", style="green")
                         table.add_column("Address", style="white")
 
                         # Show all results
-                        for place in places:
+                        for place in places_list:
                             name = place.get("displayName", {}).get("text", "Unknown")
                             addr = place.get("formattedAddress", "Unknown Address")
                             rating = place.get("rating", "N/A")
                             count = place.get("userRatingCount", 0)
                             price = place.get("priceLevel", "-")
                             
-                            # Convert Price Enum if needed (PRICE_LEVEL_MODERATE etc)
-                            # Assuming raw string or int for now
+                            dist_val = place.get("_dist_from_start", 0)
+                            dist_str = f"{dist_val:.1f}" if dist_val != float("inf") else "-"
                             
                             rating_str = f"{rating} ({count})" if rating != "N/A" else "-"
                             
-                            table.add_row(name, rating_str, str(price), addr)
+                            table.add_row(dist_str, name, rating_str, str(price), addr)
 
                         console.print(table)
                     else:
