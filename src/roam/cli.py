@@ -6,6 +6,7 @@ from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
 from roam.utils import decode_polyline, get_nearest_point_on_polyline, calculate_cumulative_distances, generate_ascii_chart
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import sys
 import urllib.parse
 
@@ -43,12 +44,12 @@ class DefaultGroup(click.Group):
 )
 def cli():
     """
-    
+    \b
     Roam: The Personal Routing Commander.
     -----------------------------------
     Calculate routes, manage your vehicle fleet, and save favorite places.
 
-    
+    \b
     Examples:
       roam "Los Angeles"
       roam "Work" --with tesla
@@ -249,7 +250,7 @@ def route(
     DESTINATION can be a city ("Los Angeles"), an address ("123 Main St"),
     or a saved place name ("work").
 
-    
+    \b
     Examples:
       roam "New York"
       roam "Gym" --origin "Work"
@@ -446,22 +447,23 @@ def route(
 
                 # Fetch Forecasts
                 weather_table = Table(box=None)
-                weather_table.add_column("Location / Time", style="bold")
+                weather_table.add_column("Location / Time (ET)", style="bold")
                 weather_table.add_column("Forecast Temp", style="cyan")
                 weather_table.add_column("Condition", style="yellow")
                 weather_table.add_column("Precip %", style="blue")
 
                 now = datetime.now(timezone.utc)
+                et_zone = ZoneInfo("America/New_York")
 
                 with console.status(
                     "[bold green]Fetching forecast along route...[/bold green]"
                 ):
                     for offset, lat, lng, desc in samples:
-                        target_time = now + timedelta(seconds=offset)
+                        target_time_utc = now + timedelta(seconds=offset)
 
                         # Fetch Hourly Forecast
                         forecast_data = requester.get_hourly_forecast(lat, lng)
-                        match = find_forecast_for_time(forecast_data, target_time)
+                        match = find_forecast_for_time(forecast_data, target_time_utc)
 
                         if match:
                             temp_c = match.get("temperature", {}).get("degrees")
@@ -481,8 +483,9 @@ def route(
                                 .get("percent", 0)
                             )
 
-                            # Format time label
-                            local_time_str = target_time.strftime("%I:%M %p")
+                            # Format time label in Eastern Time
+                            target_time_et = target_time_utc.astimezone(et_zone)
+                            local_time_str = target_time_et.strftime("%I:%M %p")
                             label = f"{desc}\n[dim]{local_time_str}[/dim]"
 
                             weather_table.add_row(
