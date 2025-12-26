@@ -186,7 +186,10 @@ class RouteRequester:
             selected_points = all_points
         else:
             step = len(all_points) / (samples - 1)
-            selected_points = [all_points[int(i * step)] for i in range(samples)]
+            selected_points = []
+            for i in range(samples):
+                idx = min(int(i * step), len(all_points) - 1)
+                selected_points.append(all_points[idx])
             
         # POST Body:
         # { "locations": [ {"lat": ..., "lng": ...}, ... ] }
