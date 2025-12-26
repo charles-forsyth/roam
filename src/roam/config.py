@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=[".env", str(Path.home() / ".config" / "roam" / ".env")],
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
     )
 
     @property
@@ -74,6 +74,6 @@ class Settings(BaseSettings):
 
 # Global settings instance
 try:
-    settings = Settings()
+    settings = Settings()  # type: ignore[call-arg]
 except Exception:
     settings = None  # type: ignore

@@ -5,10 +5,12 @@ from roam.utils import decode_polyline
 
 console = Console()
 
+
 class RouteRequester:
     """
     Handles interactions with the Google Maps Routes, Places, and Weather APIs.
     """
+
     ROUTES_BASE_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
     PLACES_BASE_URL = "https://places.googleapis.com/v1/places:searchText"
     WEATHER_BASE_URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
@@ -20,25 +22,27 @@ class RouteRequester:
         self.api_key = api_key
         self.session = requests.Session()
         # Headers are slightly different per API (FieldMasks), so we set common ones here
-        self.session.headers.update({
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": self.api_key,
-        })
+        self.session.headers.update(
+            {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": self.api_key,
+            }
+        )
 
     def compute_route(
-        self, 
-        origin: str, 
-        destination: str, 
-        mode: str = "DRIVE", 
+        self,
+        origin: str,
+        destination: str,
+        mode: str = "DRIVE",
         engine_type: Optional[str] = None,
         avoid_tolls: bool = False,
         avoid_highways: bool = False,
-        avoid_ferries: bool = False
+        avoid_ferries: bool = False,
     ) -> Dict[str, Any]:
         """
         Computes a route using the Routes API.
         """
-        payload = {
+        payload: Dict[str, Any] = {
             "origin": {"address": origin},
             "destination": {"address": destination},
             "travelMode": mode.upper(),
@@ -47,10 +51,10 @@ class RouteRequester:
             "routeModifiers": {
                 "avoidTolls": avoid_tolls,
                 "avoidHighways": avoid_highways,
-                "avoidFerries": avoid_ferries
+                "avoidFerries": avoid_ferries,
             },
             "languageCode": "en-US",
-            "units": "IMPERIAL"
+            "units": "IMPERIAL",
         }
 
         if mode.upper() == "DRIVE" and engine_type:
@@ -63,23 +67,31 @@ class RouteRequester:
         }
 
         try:
-            response = self.session.post(self.ROUTES_BASE_URL, json=payload, headers=headers, timeout=10)
+            response = self.session.post(
+                self.ROUTES_BASE_URL, json=payload, headers=headers, timeout=10
+            )
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             console.print(f"[bold red]Error connecting to Routes API:[/bold red] {e}")
-            if hasattr(e, 'response') and e.response is not None:
+            if hasattr(e, "response") and e.response is not None:
                 console.print(f"[red]Details:[/red] {e.response.text}")
             return {}
 
-    def search_along_route(self, query: str, polyline: str, origin_lat: Optional[float] = None, origin_lng: Optional[float] = None) -> List[Dict[str, Any]]:
+    def search_along_route(
+        self,
+        query: str,
+        polyline: str,
+        origin_lat: Optional[float] = None,
+        origin_lng: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Searches for places along the route polyline using Places API (New).
         Handles pagination to retrieve up to 60 results (approx).
         """
         all_places = []
         next_page_token = None
-        
+
         # We request name, formatting address, and location
         headers = {
             "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.fuelOptions,nextPageToken"
@@ -90,43 +102,42 @@ class RouteRequester:
             payload = {
                 "textQuery": query,
                 "searchAlongRouteParameters": {
-                    "polyline": {
-                        "encodedPolyline": polyline
-                    }
-                }
+                    "polyline": {"encodedPolyline": polyline}
+                },
             }
-            
+
             # If origin is provided, request routing summaries
             if origin_lat is not None and origin_lng is not None:
                 payload["routingParameters"] = {
-                    "origin": {
-                        "latitude": origin_lat,
-                        "longitude": origin_lng
-                    }
+                    "origin": {"latitude": origin_lat, "longitude": origin_lng}
                 }
-            
+
             if next_page_token:
                 payload["pageToken"] = next_page_token
 
             try:
-                response = self.session.post(self.PLACES_BASE_URL, json=payload, headers=headers, timeout=10)
+                response = self.session.post(
+                    self.PLACES_BASE_URL, json=payload, headers=headers, timeout=10
+                )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 places = data.get("places", [])
                 if places:
                     all_places.extend(places)
-                
+
                 next_page_token = data.get("nextPageToken")
                 if not next_page_token:
                     break
-                    
+
             except requests.exceptions.RequestException as e:
-                console.print(f"[bold red]Error searching along route for '{query}':[/bold red] {e}")
-                if hasattr(e, 'response') and e.response is not None:
+                console.print(
+                    f"[bold red]Error searching along route for '{query}':[/bold red] {e}"
+                )
+                if hasattr(e, "response") and e.response is not None:
                     console.print(f"[red]Details:[/red] {e.response.text}")
                 break
-                
+
         return all_places
 
     def get_weather(self, lat: float, lng: float) -> Dict[str, Any]:
@@ -134,17 +145,17 @@ class RouteRequester:
         Fetches current weather conditions for a specific location.
         """
         # The Weather API uses GET requests with query parameters
-        params = {
+        params: Dict[str, Any] = {
             "location.latitude": lat,
             "location.longitude": lng,
-            "key": self.api_key 
+            "key": self.api_key,
         }
-        
+
         # Removing Content-Type for GET
-        headers = self.session.headers.copy()
+        headers = dict(self.session.headers)
         if "Content-Type" in headers:
             del headers["Content-Type"]
-        
+
         try:
             response = requests.get(self.WEATHER_BASE_URL, params=params, timeout=5)
             response.raise_for_status()
@@ -158,13 +169,13 @@ class RouteRequester:
         Fetches hourly weather forecast for a specific location.
         Requests 240 hours (10 days) to cover future trips.
         """
-        params = {
+        params: Dict[str, Any] = {
             "location.latitude": lat,
             "location.longitude": lng,
             "hours": 240,
-            "key": self.api_key 
+            "key": self.api_key,
         }
-        
+
         try:
             response = requests.get(self.FORECAST_BASE_URL, params=params, timeout=5)
             response.raise_for_status()
@@ -177,32 +188,37 @@ class RouteRequester:
         """
         Fetches daily weather forecast for a specific location (10 days).
         """
-        params = {
+        params: Dict[str, Any] = {
             "location.latitude": lat,
             "location.longitude": lng,
             "days": 10,
-            "key": self.api_key 
+            "pageSize": 10,
+            "key": self.api_key,
         }
-        
+
         try:
-            response = requests.get(self.DAILY_FORECAST_BASE_URL, params=params, timeout=5)
+            response = requests.get(
+                self.DAILY_FORECAST_BASE_URL, params=params, timeout=5
+            )
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             console.print(f"[red]Daily Forecast API Error:[/red] {e}")
             return {}
 
-    def get_elevation_along_path(self, encoded_polyline: str, samples: int = 50) -> List[Dict[str, Any]]:
+    def get_elevation_along_path(
+        self, encoded_polyline: str, samples: int = 50
+    ) -> List[Dict[str, Any]]:
         """
         Fetches elevation data for sampled points along a polyline.
         Decodes polyline locally and samples points, then sends via GET using 'locations'.
         """
         # Decode polyline
         all_points = decode_polyline(encoded_polyline)
-        
+
         if not all_points:
             return []
-            
+
         # Sample 'samples' points uniformly
         if len(all_points) <= samples:
             selected_points = all_points
@@ -212,29 +228,32 @@ class RouteRequester:
             for i in range(samples):
                 idx = min(int(i * step), len(all_points) - 1)
                 selected_points.append(all_points[idx])
-            
+
         # Format for GET: locations=lat,lng|lat,lng|...
-        locations_str = "|".join([f"{p['latitude']},{p['longitude']}" for p in selected_points])
-        
-        params = {
-            "locations": locations_str,
-            "key": self.api_key
-        }
-        
+        locations_str = "|".join(
+            [f"{p['latitude']},{p['longitude']}" for p in selected_points]
+        )
+
+        params = {"locations": locations_str, "key": self.api_key}
+
         # Remove Content-Type for GET
-        headers = self.session.headers.copy()
+        headers = dict(self.session.headers)
         if "Content-Type" in headers:
             del headers["Content-Type"]
-            
+
         try:
-            response = requests.get(self.ELEVATION_BASE_URL, params=params, headers=headers, timeout=10)
+            response = requests.get(
+                self.ELEVATION_BASE_URL, params=params, headers=headers, timeout=10
+            )
             response.raise_for_status()
             data = response.json()
-            
+
             if data.get("status") != "OK":
-                console.print(f"[red]Elevation API Error:[/red] {data.get('status')} - {data.get('error_message')}")
+                console.print(
+                    f"[red]Elevation API Error:[/red] {data.get('status')} - {data.get('error_message')}"
+                )
                 return []
-                
+
             return data.get("results", [])
         except requests.exceptions.RequestException as e:
             console.print(f"[red]Elevation API Error:[/red] {e}")
