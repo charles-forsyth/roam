@@ -12,6 +12,7 @@ class RouteRequester:
     PLACES_BASE_URL = "https://places.googleapis.com/v1/places:searchText"
     WEATHER_BASE_URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
     FORECAST_BASE_URL = "https://weather.googleapis.com/v1/forecast/hours:lookup"
+    ELEVATION_BASE_URL = "https://maps.googleapis.com/maps/api/elevation/json"
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -167,3 +168,30 @@ class RouteRequester:
         except requests.exceptions.RequestException as e:
             console.print(f"[red]Forecast API Error:[/red] {e}")
             return {}
+
+    def get_elevation_along_path(self, encoded_polyline: str, samples: int = 50) -> List[Dict[str, Any]]:
+        """
+        Fetches elevation data for sampled points along a polyline.
+        """
+        params = {
+            "path": f"enc:{encoded_polyline}",
+            "samples": samples,
+            "key": self.api_key
+        }
+        
+        # Note: Elevation API might not like `X-Goog-Api-Key` header if key is in params? 
+        # It's a standard Maps API, usually accepts query param `key`.
+        # Headers clean-up handled below.
+        
+        headers = self.session.headers.copy()
+        if "Content-Type" in headers:
+            del headers["Content-Type"]
+            
+        try:
+            response = requests.get(self.ELEVATION_BASE_URL, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("results", [])
+        except requests.exceptions.RequestException as e:
+            console.print(f"[red]Elevation API Error:[/red] {e}")
+            return []

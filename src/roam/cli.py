@@ -4,7 +4,7 @@ from rich.panel import Panel
 from rich.table import Table
 from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
-from roam.utils import decode_polyline, get_nearest_point_on_polyline, calculate_cumulative_distances
+from roam.utils import decode_polyline, get_nearest_point_on_polyline, calculate_cumulative_distances, generate_ascii_chart
 from datetime import datetime, timedelta, timezone
 import sys
 import urllib.parse
@@ -212,6 +212,12 @@ def generate_maps_url(origin, destination, mode):
     help="Fetch hourly weather forecast for points along the route.",
 )
 @click.option(
+    "--elevation",
+    "-E",
+    is_flag=True,
+    help="Display elevation profile chart for the route.",
+)
+@click.option(
     "--url",
     "-u",
     is_flag=True,
@@ -233,6 +239,7 @@ def route(
     directions,
     find,
     weather,
+    elevation,
     url,
     html,
 ):
@@ -357,6 +364,27 @@ def route(
                 start_loc = legs[0].get("startLocation", {}).get("latLng", {})
                 start_lat = start_loc.get("latitude")
                 start_lng = start_loc.get("longitude")
+
+            # --- Elevation Profile ---
+            if elevation and encoded_polyline:
+                console.print("\n[bold]Elevation Profile:[/bold]")
+                with console.status("[bold green]Fetching elevation data...[/bold green]"):
+                    # Use 60 samples for the ASCII chart width (default width=60)
+                    elevation_data = requester.get_elevation_along_path(encoded_polyline, samples=60)
+                    if elevation_data:
+                        # Extract elevation values (in meters) and convert to feet
+                        elevations = [p.get("elevation", 0) * 3.28084 for p in elevation_data]
+                        
+                        min_elev = min(elevations)
+                        max_elev = max(elevations)
+                        gain = max_elev - min_elev # Simple range, not cumulative gain
+                        
+                        console.print(f"Max: {int(max_elev)} ft | Min: {int(min_elev)} ft | Range: {int(gain)} ft")
+                        
+                        chart = generate_ascii_chart(elevations, height=10)
+                        console.print(chart)
+                    else:
+                        console.print("[yellow]Could not fetch elevation data.[/yellow]")
 
             # --- Smart Forecast Weather ---
             if weather:

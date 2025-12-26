@@ -80,10 +80,6 @@ def get_nearest_point_on_polyline(point_lat, point_lng, polyline_points):
     min_dist = float("inf")
     best_index = -1
     
-    # We check every vertex. 
-    # For very long routes (5000+ points), this might be slow in Python (O(N)).
-    # We can optimize by step if needed, but let's stick to simple first.
-    
     for i, p in enumerate(polyline_points):
         d = haversine_distance(point_lat, point_lng, p["latitude"], p["longitude"])
         if d < min_dist:
@@ -105,3 +101,48 @@ def calculate_cumulative_distances(polyline_points):
         total += d
         distances.append(total)
     return distances
+
+def generate_ascii_chart(data, height=10, width=60):
+    """
+    Generates a simple ASCII line chart from a list of numbers.
+    """
+    if not data:
+        return ""
+        
+    min_val = min(data)
+    max_val = max(data)
+    range_val = max_val - min_val
+    if range_val == 0:
+        range_val = 1
+        
+    # Normalize data to fit height
+    normalized = [int((x - min_val) / range_val * (height - 1)) for x in data]
+    
+    # Create grid
+    grid = [[' ' for _ in range(len(data))] for _ in range(height)]
+    
+    for x, y in enumerate(normalized):
+        # Invert y for drawing (0 is top in list, but we want 0 at bottom visually)
+        grid[height - 1 - y][x] = '•' # Character for point
+        
+        # Draw line down to fill area? Or just line?
+        # Let's do simple line/points
+        
+        # Connect points with simple slope char if possible, but dot is robust.
+    
+    # Build string
+    lines = []
+    
+    # Y-axis labels
+    label_step = range_val / (height - 1)
+    
+    for y in range(height):
+        val = max_val - (y * label_step)
+        label = f"{int(val):>5} |"
+        row_str = "".join(grid[y])
+        lines.append(f"{label} {row_str}")
+        
+    # X-axis
+    lines.append(f"      0 +{'-' * len(data)}")
+    
+    return "\n".join(lines)
