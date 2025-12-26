@@ -4,7 +4,13 @@ from rich.panel import Panel
 from rich.table import Table
 from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
-from roam.utils import decode_polyline, get_nearest_point_on_polyline, calculate_cumulative_distances, generate_ascii_chart, get_timezone_at_point
+from roam.utils import (
+    decode_polyline,
+    get_nearest_point_on_polyline,
+    calculate_cumulative_distances,
+    generate_ascii_chart,
+    get_timezone_at_point,
+)
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import sys
@@ -76,6 +82,7 @@ def get_seconds(duration_str):
     except Exception:
         return 0
 
+
 def format_price_level(level):
     mapping = {
         "PRICE_LEVEL_INEXPENSIVE": "$",
@@ -85,29 +92,32 @@ def format_price_level(level):
     }
     return mapping.get(level, level) if level else "-"
 
+
 def get_fuel_price(place):
     """Extracts Regular Unleaded price if available."""
     fuel_options = place.get("fuelOptions", {})
     prices = fuel_options.get("fuelPrices", [])
-    
+
     for p in prices:
         if p.get("type") == "REGULAR_UNLEADED":
             price_obj = p.get("price", {})
             units = int(price_obj.get("units", 0))
             nanos = int(price_obj.get("nanos", 0))
             currency = price_obj.get("currencyCode", "USD")
-            
+
             # Construct float
             val = units + (nanos / 1_000_000_000)
-            
+
             symbol = "$" if currency == "USD" else currency + " "
             return f"{symbol}{val:.2f}"
-            
+
     return None
 
-def find_forecast_for_time(forecast_data, target_time):
+
+def find_forecast_for_time(forecast_data, target_time, max_diff_seconds=7200):
     """
     Finds the hourly forecast entry closest to target_time.
+    If the closest match is further than max_diff_seconds, returns None.
     """
     hourly = forecast_data.get("forecastHours", [])
     if not hourly:
@@ -131,28 +141,53 @@ def find_forecast_for_time(forecast_data, target_time):
         except ValueError:
             continue
 
+    if closest and min_diff > max_diff_seconds:
+        return None
+
     return closest
+
+
+def find_daily_forecast_for_date(daily_data, target_date):
+    """
+    Finds the daily forecast entry for target_date.
+    target_date should be a date object.
+    """
+    days = daily_data.get("forecastDays", [])
+    for entry in days:
+        date_str = entry.get("interval", {}).get("startTime")
+        if not date_str:
+            continue
+        try:
+            # Weather API date_str is usually "YYYY-MM-DDTHH:MM:SSZ"
+            f_date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+            if f_date == target_date:
+                return entry
+        except ValueError:
+            continue
+    return None
+
 
 def generate_maps_url(origin, destination, mode):
     """Generates a Universal Google Maps URL."""
     base = "https://www.google.com/maps/dir/?api=1"
-    
+
     # Map roam modes to Google Maps travelmode
     mode_map = {
         "drive": "driving",
         "bicycle": "bicycling",
-        "two_wheeler": "driving", # Maps URL doesn't support 2-wheeler mode explicitly
+        "two_wheeler": "driving",  # Maps URL doesn't support 2-wheeler mode explicitly
         "transit": "transit",
-        "walk": "walking"
+        "walk": "walking",
     }
-    
+
     params = {
         "origin": origin,
         "destination": destination,
-        "travelmode": mode_map.get(mode, "driving")
+        "travelmode": mode_map.get(mode, "driving"),
     }
-    
+
     return f"{base}&{urllib.parse.urlencode(params)}"
+
 
 def parse_start_time(start_str, date_str, origin_tz_str):
     """
@@ -161,10 +196,10 @@ def parse_start_time(start_str, date_str, origin_tz_str):
     """
     tz = ZoneInfo(origin_tz_str)
     now = datetime.now(tz)
-    
+
     target_date = now.date()
     target_time = now.time()
-    
+
     if date_str:
         if date_str.lower() == "tomorrow":
             target_date = now.date() + timedelta(days=1)
@@ -180,7 +215,9 @@ def parse_start_time(start_str, date_str, origin_tz_str):
                     dt = datetime.strptime(date_str, "%m-%d")
                     target_date = dt.date().replace(year=now.year)
                 except ValueError:
-                    console.print(f"[yellow]Could not parse date '{date_str}'. Using today.[/yellow]")
+                    console.print(
+                        f"[yellow]Could not parse date '{date_str}'. Using today.[/yellow]"
+                    )
 
     if start_str:
         # Try various formats
@@ -192,20 +229,22 @@ def parse_start_time(start_str, date_str, origin_tz_str):
                 break
             except ValueError:
                 pass
-        
+
         if parsed:
             target_time = parsed
         else:
-            console.print(f"[yellow]Could not parse time '{start_str}'. Using now.[/yellow]")
+            console.print(
+                f"[yellow]Could not parse time '{start_str}'. Using now.[/yellow]"
+            )
 
     # Combine
     start_dt = datetime.combine(target_date, target_time).replace(tzinfo=tz)
-    
+
     # If the combined time is in the past (and date wasn't explicit), maybe they meant tomorrow?
     # e.g. it's 9 PM, user says "8 AM". Usually means next day.
-    # But explicit date overrides this. 
+    # But explicit date overrides this.
     # Let's keep it simple: strict interpretation.
-    
+
     return start_dt
 
 
@@ -395,7 +434,7 @@ def route(
 
     console.print(
         Panel(
-            f"Routing from [bold]{origin}[/bold] to [bold cyan]{destination}[/bold cyan] {" ".join(status_parts)}...",
+            f"Routing from [bold]{origin}[/bold] to [bold cyan]{destination}[/bold cyan] {' '.join(status_parts)}...",
             title="Roam",
         )
     )
@@ -440,11 +479,13 @@ def route(
                     origin_tz_str = get_timezone_at_point(start_lat, start_lng)
                 else:
                     origin_tz_str = "UTC"
-                
+
                 # Parse user start time in that timezone
                 start_dt = parse_start_time(start, date, origin_tz_str)
-                console.print(f"\n[bold]Route Forecast:[/bold] Departing at [cyan]{start_dt.strftime('%Y-%m-%d %I:%M %p')}[/cyan] ({origin_tz_str})")
-                
+                console.print(
+                    f"\n[bold]Route Forecast:[/bold] Departing at [cyan]{start_dt.strftime('%Y-%m-%d %I:%M %p')}[/cyan] ({origin_tz_str})"
+                )
+
                 # We want to sample points every ~1 hour (3600s)
                 SAMPLE_INTERVAL = 3600
 
@@ -477,7 +518,7 @@ def route(
                                         current_elapsed,
                                         end_loc.get("latitude"),
                                         end_loc.get("longitude"),
-                                        f"En Route (+{format_duration(str(current_elapsed)+'s')})",
+                                        f"En Route (+{format_duration(str(current_elapsed) + 's')})",
                                     )
                                 )
                                 last_sample_time = current_elapsed
@@ -513,7 +554,7 @@ def route(
                         # Determine LOCAL Timezone for this point
                         local_tz_str = get_timezone_at_point(lat, lng)
                         local_tz = ZoneInfo(local_tz_str)
-                        
+
                         # Target UTC time for API lookup
                         # Start Time (Aware) + Offset
                         target_time_aware = start_dt + timedelta(seconds=offset)
@@ -523,72 +564,110 @@ def route(
                         forecast_data = requester.get_hourly_forecast(lat, lng)
                         match = find_forecast_for_time(forecast_data, target_time_utc)
 
+                        is_daily = False
+                        if not match:
+                            # Fallback to Daily Forecast
+                            daily_data = requester.get_daily_forecast(lat, lng)
+                            match = find_daily_forecast_for_date(
+                                daily_data, target_time_aware.date()
+                            )
+                            if match:
+                                is_daily = True
+
                         if match:
-                            temp_c = match.get("temperature", {}).get("degrees")
+                            if not is_daily:
+                                temp_c = match.get("temperature", {}).get("degrees")
+                                condition = (
+                                    match.get("weatherCondition", {})
+                                    .get("description", {})
+                                    .get("text", "Unknown")
+                                )
+                                precip = (
+                                    match.get("precipitation", {})
+                                    .get("probability", {})
+                                    .get("percent", 0)
+                                )
+                            else:
+                                # Daily forecast has day/night and max/min temps
+                                day_stats = match.get("day") or {}
+                                # Use maxTemperature as the representative temp for the day
+                                temp_c = match.get("maxTemperature", {}).get("degrees")
+                                condition = day_stats.get("weatherCondition", {}).get(
+                                    "description", {}
+                                ).get("text") or match.get("weatherCondition", {}).get(
+                                    "description", {}
+                                ).get("text", "Unknown")
+                                precip = day_stats.get("precipitation", {}).get(
+                                    "probability", {}
+                                ).get("percent") or match.get(
+                                    "maxPrecipitationProbability", {}
+                                ).get("percent", 0)
+
                             temp_f = (
                                 (temp_c * 9 / 5) + 32 if temp_c is not None else None
                             )
                             temp_str = f"{temp_f:.1f}°F" if temp_f else "N/A"
-
-                            condition = (
-                                match.get("weatherCondition", {})
-                                .get("description", {})
-                                .get("text", "Unknown")
-                            )
-                            precip = (
-                                match.get("precipitation", {})
-                                .get("probability", {})
-                                .get("percent", 0)
-                            )
+                            if is_daily:
+                                temp_str += " (avg)"
 
                             # Format display time in LOCAL timezone of the point
                             local_display_time = target_time_utc.astimezone(local_tz)
                             local_time_str = local_display_time.strftime("%I:%M %p")
-                            # Add timezone abbr (e.g. EST, CST) if helpful, or just TZ name?
-                            # Abbr is cleaner. %Z
                             tz_abbr = local_display_time.strftime("%Z")
-                            
-                            label = f"{desc}\n[dim]{local_time_str} {tz_abbr}[/dim]"
+
+                            label = f"{desc}\n[dim]{local_time_str} {tz_abbr}"
+                            if is_daily:
+                                label += "\n[Daily Forecast]"
+                            label += "[/dim]"
 
                             weather_table.add_row(
                                 label, temp_str, condition, f"{precip}%"
                             )
                         else:
                             weather_table.add_row(desc, "No Data", "-", "-")
-
                 console.print(weather_table)
 
             # --- Elevation Profile ---
             if elevation and encoded_polyline:
                 console.print("\n[bold]Elevation Profile:[/bold]")
-                with console.status("[bold green]Fetching elevation data...[/bold green]"):
+                with console.status(
+                    "[bold green]Fetching elevation data...[/bold green]"
+                ):
                     # Use 60 samples for the ASCII chart width (default width=60)
-                    elevation_data = requester.get_elevation_along_path(encoded_polyline, samples=60)
+                    elevation_data = requester.get_elevation_along_path(
+                        encoded_polyline, samples=60
+                    )
                     if elevation_data:
                         # Extract elevation values (in meters) and convert to feet
-                        elevations = [p.get("elevation", 0) * 3.28084 for p in elevation_data]
-                        
+                        elevations = [
+                            p.get("elevation", 0) * 3.28084 for p in elevation_data
+                        ]
+
                         min_elev = min(elevations)
                         max_elev = max(elevations)
-                        gain = max_elev - min_elev # Simple range, not cumulative gain
-                        
-                        console.print(f"Max: {int(max_elev)} ft | Min: {int(min_elev)} ft | Range: {int(gain)} ft")
-                        
+                        gain = max_elev - min_elev  # Simple range, not cumulative gain
+
+                        console.print(
+                            f"Max: {int(max_elev)} ft | Min: {int(min_elev)} ft | Range: {int(gain)} ft"
+                        )
+
                         chart = generate_ascii_chart(elevations, height=10)
                         console.print(chart)
                     else:
-                        console.print("[yellow]Could not fetch elevation data.[/yellow]")
+                        console.print(
+                            "[yellow]Could not fetch elevation data.[/yellow]"
+                        )
 
             # --- Search Along Route ---
             if find and encoded_polyline:
                 console.print("\n[bold]Highlights Along Route:[/bold]")
-                
+
                 # Decode polyline once for Detour calculation
                 route_points = decode_polyline(encoded_polyline)
-                
+
                 # Pre-calculate distances for Trip Mile
                 cumulative_distances = calculate_cumulative_distances(route_points)
-                
+
                 for query in find:
                     console.print(f"  [dim]Searching for '{query}'...[/dim]")
                     # We no longer pass origin/routingParams because we calculate trip mile manually
@@ -601,22 +680,24 @@ def route(
                             loc = place.get("location", {})
                             lat = loc.get("latitude")
                             lng = loc.get("longitude")
-                            
+
                             if lat and lng:
                                 # Subsample points for finding nearest point speed
                                 # NOTE: If we subsample, we must map index back to original index for cumulative_distances
-                                
+
                                 # Simple optimization: Check every 5th point
                                 STEP = 5
                                 sub_points = route_points[::STEP]
-                                
-                                detour_mi, sub_index = get_nearest_point_on_polyline(lat, lng, sub_points)
-                                
+
+                                detour_mi, sub_index = get_nearest_point_on_polyline(
+                                    lat, lng, sub_points
+                                )
+
                                 # Map sub_index to real index
                                 real_index = sub_index * STEP
                                 if real_index >= len(cumulative_distances):
                                     real_index = len(cumulative_distances) - 1
-                                
+
                                 place["_detour_mi"] = detour_mi
                                 place["_trip_mi"] = cumulative_distances[real_index]
                             else:
@@ -645,25 +726,46 @@ def route(
                             rating = place.get("rating", "N/A")
                             count = place.get("userRatingCount", 0)
                             price_level = place.get("priceLevel", "")
-                            
+
                             fuel_price = get_fuel_price(place)
-                            price_display = fuel_price if fuel_price else format_price_level(price_level)
-                            
+                            price_display = (
+                                fuel_price
+                                if fuel_price
+                                else format_price_level(price_level)
+                            )
+
                             # Trip Mile
                             trip_mi = place.get("_trip_mi", float("inf"))
-                            trip_str = f"{trip_mi:.1f} mi" if trip_mi != float("inf") else "-"
-                            
+                            trip_str = (
+                                f"{trip_mi:.1f} mi" if trip_mi != float("inf") else "-"
+                            )
+
                             # Detour
                             detour_mi = place.get("_detour_mi", float("inf"))
-                            detour_str = f"+{detour_mi:.1f} mi" if detour_mi != float("inf") else "-"
-                            
-                            rating_str = f"{rating} ({count})" if rating != "N/A" else "-"
-                            
-                            table.add_row(trip_str, detour_str, name, rating_str, str(price_display), addr)
+                            detour_str = (
+                                f"+{detour_mi:.1f} mi"
+                                if detour_mi != float("inf")
+                                else "-"
+                            )
+
+                            rating_str = (
+                                f"{rating} ({count})" if rating != "N/A" else "-"
+                            )
+
+                            table.add_row(
+                                trip_str,
+                                detour_str,
+                                name,
+                                rating_str,
+                                str(price_display),
+                                addr,
+                            )
 
                         console.print(table)
                     else:
-                        console.print(f"  [yellow]No '{query}' found along route.[/yellow]")
+                        console.print(
+                            f"  [yellow]No '{query}' found along route.[/yellow]"
+                        )
 
             if directions:
                 console.print("\n[bold]Directions:[/bold]")
@@ -694,14 +796,15 @@ def route(
                 console.print(
                     "\n[dim]Use -d for steps, -F for places, -W for weather.[/dim]"
                 )
-            
+
             # --- Output & Sharing ---
             if url:
                 maps_url = generate_maps_url(final_origin, final_dest, final_mode)
                 console.print(f"\n[bold green]Open in Maps:[/bold green] {maps_url}")
-            
+
             if html:
                 from rich.terminal_theme import MONOKAI
+
                 console.save_html("roam_report.html", theme=MONOKAI)
                 console.print("\n[bold]Report saved to:[/bold] roam_report.html")
 
