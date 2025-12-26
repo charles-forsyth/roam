@@ -443,7 +443,7 @@ def route(
                 
                 # Parse user start time in that timezone
                 start_dt = parse_start_time(start, date, origin_tz_str)
-                console.print(f"\n[bold]Route Forecast:[/bold] Departing at [cyan]{start_dt.strftime('%I:%M %p')}[/cyan] ({origin_tz_str})")
+                console.print(f"\n[bold]Route Forecast:[/bold] Departing at [cyan]{start_dt.strftime('%Y-%m-%d %I:%M %p')}[/cyan] ({origin_tz_str})")
                 
                 # We want to sample points every ~1 hour (3600s)
                 SAMPLE_INTERVAL = 3600
