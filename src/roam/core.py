@@ -155,10 +155,12 @@ class RouteRequester:
     def get_hourly_forecast(self, lat: float, lng: float) -> Dict[str, Any]:
         """
         Fetches hourly weather forecast for a specific location.
+        Requests 240 hours (10 days) to cover future trips.
         """
         params = {
             "location.latitude": lat,
             "location.longitude": lng,
+            "hours": 240,
             "key": self.api_key 
         }
         
