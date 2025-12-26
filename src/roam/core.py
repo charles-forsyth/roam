@@ -13,6 +13,7 @@ class RouteRequester:
     PLACES_BASE_URL = "https://places.googleapis.com/v1/places:searchText"
     WEATHER_BASE_URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
     FORECAST_BASE_URL = "https://weather.googleapis.com/v1/forecast/hours:lookup"
+    DAILY_FORECAST_BASE_URL = "https://weather.googleapis.com/v1/forecast/days:lookup"
     ELEVATION_BASE_URL = "https://maps.googleapis.com/maps/api/elevation/json"
 
     def __init__(self, api_key: str):
@@ -170,6 +171,25 @@ class RouteRequester:
             return response.json()
         except requests.exceptions.RequestException as e:
             console.print(f"[red]Forecast API Error:[/red] {e}")
+            return {}
+
+    def get_daily_forecast(self, lat: float, lng: float) -> Dict[str, Any]:
+        """
+        Fetches daily weather forecast for a specific location (10 days).
+        """
+        params = {
+            "location.latitude": lat,
+            "location.longitude": lng,
+            "days": 10,
+            "key": self.api_key 
+        }
+        
+        try:
+            response = requests.get(self.DAILY_FORECAST_BASE_URL, params=params, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            console.print(f"[red]Daily Forecast API Error:[/red] {e}")
             return {}
 
     def get_elevation_along_path(self, encoded_polyline: str, samples: int = 50) -> List[Dict[str, Any]]:

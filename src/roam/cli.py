@@ -544,11 +544,12 @@ def route(
                             # Format display time in LOCAL timezone of the point
                             local_display_time = target_time_utc.astimezone(local_tz)
                             local_time_str = local_display_time.strftime("%I:%M %p")
-                            # Add timezone abbr (e.g. EST, CST) if helpful, or just TZ name?
-                            # Abbr is cleaner. %Z
                             tz_abbr = local_display_time.strftime("%Z")
                             
-                            label = f"{desc}\n[dim]{local_time_str} {tz_abbr}[/dim]"
+                            # DEBUG: Show what API time we matched
+                            matched_time = match.get("interval", {}).get("startTime", "N/A")
+                            
+                            label = f"{desc}\n[dim]{local_time_str} {tz_abbr}\nMatch: {matched_time}[/dim]"
 
                             weather_table.add_row(
                                 label, temp_str, condition, f"{precip}%"
