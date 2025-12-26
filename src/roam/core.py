@@ -172,25 +172,28 @@ class RouteRequester:
     def get_elevation_along_path(self, encoded_polyline: str, samples: int = 50) -> List[Dict[str, Any]]:
         """
         Fetches elevation data for sampled points along a polyline.
+        Uses POST to handle long polylines.
         """
         params = {
-            "path": f"enc:{encoded_polyline}",
-            "samples": samples,
             "key": self.api_key
         }
         
-        # Note: Elevation API might not like `X-Goog-Api-Key` header if key is in params? 
-        # It's a standard Maps API, usually accepts query param `key`.
-        # Headers clean-up handled below.
+        payload = {
+            "path": f"enc:{encoded_polyline}",
+            "samples": samples
+        }
         
-        headers = self.session.headers.copy()
-        if "Content-Type" in headers:
-            del headers["Content-Type"]
+        headers = {"Content-Type": "application/json"}
             
         try:
-            response = requests.get(self.ELEVATION_BASE_URL, params=params, headers=headers, timeout=10)
+            response = requests.post(self.ELEVATION_BASE_URL, params=params, json=payload, headers=headers, timeout=10)
             response.raise_for_status()
             data = response.json()
+            
+            if data.get("status") != "OK":
+                console.print(f"[red]Elevation API Error:[/red] {data.get('status')} - {data.get('error_message')}")
+                return []
+                
             return data.get("results", [])
         except requests.exceptions.RequestException as e:
             console.print(f"[red]Elevation API Error:[/red] {e}")
