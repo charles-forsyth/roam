@@ -1,6 +1,7 @@
 import requests
 from typing import Optional, Dict, Any, List
 from rich.console import Console
+from roam.utils import decode_polyline
 
 console = Console()
 
@@ -172,15 +173,35 @@ class RouteRequester:
     def get_elevation_along_path(self, encoded_polyline: str, samples: int = 50) -> List[Dict[str, Any]]:
         """
         Fetches elevation data for sampled points along a polyline.
-        Uses POST to handle long polylines.
+        Decodes polyline locally and samples points to avoid API path limits.
         """
+        # Decode polyline
+        all_points = decode_polyline(encoded_polyline)
+        
+        if not all_points:
+            return []
+            
+        # Sample 'samples' points uniformly
+        if len(all_points) <= samples:
+            selected_points = all_points
+        else:
+            step = len(all_points) / (samples - 1)
+            selected_points = [all_points[int(i * step)] for i in range(samples)]
+            
+        # POST Body:
+        # { "locations": [ {"lat": ..., "lng": ...}, ... ] }
+        
+        locations_payload = [
+            {"lat": p["latitude"], "lng": p["longitude"]} 
+            for p in selected_points
+        ]
+        
         params = {
             "key": self.api_key
         }
         
         payload = {
-            "path": f"enc:{encoded_polyline}",
-            "samples": samples
+            "locations": locations_payload
         }
         
         headers = {"Content-Type": "application/json"}
