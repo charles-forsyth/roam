@@ -1,6 +1,6 @@
 [project]
 name = "roam"
-version = "0.1.21"
+version = "0.1.22"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -14,6 +14,7 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "requests>=2.32.5",
     "rich>=14.2.0",
+    "timezonefinder>=8.2.0",
 ]
 
 [project.scripts]

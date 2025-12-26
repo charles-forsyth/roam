@@ -4,7 +4,7 @@ from rich.panel import Panel
 from rich.table import Table
 from roam.config import settings, VehicleConfig
 from roam.core import RouteRequester
-from roam.utils import decode_polyline, get_nearest_point_on_polyline, calculate_cumulative_distances, generate_ascii_chart
+from roam.utils import decode_polyline, get_nearest_point_on_polyline, calculate_cumulative_distances, generate_ascii_chart, get_timezone_at_point
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import sys
@@ -154,6 +154,60 @@ def generate_maps_url(origin, destination, mode):
     
     return f"{base}&{urllib.parse.urlencode(params)}"
 
+def parse_start_time(start_str, date_str, origin_tz_str):
+    """
+    Parses start time and date into a timezone-aware datetime object.
+    Defaults to now if not provided.
+    """
+    tz = ZoneInfo(origin_tz_str)
+    now = datetime.now(tz)
+    
+    target_date = now.date()
+    target_time = now.time()
+    
+    if date_str:
+        if date_str.lower() == "tomorrow":
+            target_date = now.date() + timedelta(days=1)
+        elif date_str.lower() == "today":
+            target_date = now.date()
+        else:
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                # Try MM-DD
+                try:
+                    # Assume current year
+                    dt = datetime.strptime(date_str, "%m-%d")
+                    target_date = dt.date().replace(year=now.year)
+                except ValueError:
+                    console.print(f"[yellow]Could not parse date '{date_str}'. Using today.[/yellow]")
+
+    if start_str:
+        # Try various formats
+        formats = ["%H:%M", "%I:%M %p", "%I:%M%p"]
+        parsed = None
+        for fmt in formats:
+            try:
+                parsed = datetime.strptime(start_str, fmt).time()
+                break
+            except ValueError:
+                pass
+        
+        if parsed:
+            target_time = parsed
+        else:
+            console.print(f"[yellow]Could not parse time '{start_str}'. Using now.[/yellow]")
+
+    # Combine
+    start_dt = datetime.combine(target_date, target_time).replace(tzinfo=tz)
+    
+    # If the combined time is in the past (and date wasn't explicit), maybe they meant tomorrow?
+    # e.g. it's 9 PM, user says "8 AM". Usually means next day.
+    # But explicit date overrides this. 
+    # Let's keep it simple: strict interpretation.
+    
+    return start_dt
+
 
 @cli.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("destination")
@@ -213,6 +267,16 @@ def generate_maps_url(origin, destination, mode):
     help="Fetch hourly weather forecast for points along the route.",
 )
 @click.option(
+    "--start",
+    "-s",
+    help="Departure time (e.g. '08:00 AM' or '14:30'). Defaults to now.",
+)
+@click.option(
+    "--date",
+    "-D",
+    help="Departure date (e.g. '2025-12-25' or 'tomorrow'). Defaults to today.",
+)
+@click.option(
     "--elevation",
     "-E",
     is_flag=True,
@@ -240,6 +304,8 @@ def route(
     directions,
     find,
     weather,
+    start,
+    date,
     elevation,
     url,
     html,
@@ -254,7 +320,7 @@ def route(
     Examples:
       roam "New York"
       roam "Gym" --origin "Work"
-      roam "Seattle" -W -F "Starbucks"
+      roam "Seattle" -W -s "08:00 AM" -D "tomorrow"
     """
     if not settings:
         console.print(
@@ -366,30 +432,18 @@ def route(
                 start_lat = start_loc.get("latitude")
                 start_lng = start_loc.get("longitude")
 
-            # --- Elevation Profile ---
-            if elevation and encoded_polyline:
-                console.print("\n[bold]Elevation Profile:[/bold]")
-                with console.status("[bold green]Fetching elevation data...[/bold green]"):
-                    # Use 60 samples for the ASCII chart width (default width=60)
-                    elevation_data = requester.get_elevation_along_path(encoded_polyline, samples=60)
-                    if elevation_data:
-                        # Extract elevation values (in meters) and convert to feet
-                        elevations = [p.get("elevation", 0) * 3.28084 for p in elevation_data]
-                        
-                        min_elev = min(elevations)
-                        max_elev = max(elevations)
-                        gain = max_elev - min_elev # Simple range, not cumulative gain
-                        
-                        console.print(f"Max: {int(max_elev)} ft | Min: {int(min_elev)} ft | Range: {int(gain)} ft")
-                        
-                        chart = generate_ascii_chart(elevations, height=10)
-                        console.print(chart)
-                    else:
-                        console.print("[yellow]Could not fetch elevation data.[/yellow]")
-
             # --- Smart Forecast Weather ---
             if weather:
-                console.print("\n[bold]Route Forecast:[/bold]")
+                # 1. Determine Start Time and Timezone
+                # We need start_lat, start_lng to get Origin TZ
+                if start_lat and start_lng:
+                    origin_tz_str = get_timezone_at_point(start_lat, start_lng)
+                else:
+                    origin_tz_str = "UTC"
+                
+                # Parse user start time in that timezone
+                start_dt = parse_start_time(start, date, origin_tz_str)
+                console.print(f"\n[bold]Route Forecast:[/bold] Departing at [cyan]{start_dt.strftime('%I:%M %p')}[/cyan] ({origin_tz_str})")
                 
                 # We want to sample points every ~1 hour (3600s)
                 SAMPLE_INTERVAL = 3600
@@ -447,19 +501,23 @@ def route(
 
                 # Fetch Forecasts
                 weather_table = Table(box=None)
-                weather_table.add_column("Location / Time (ET)", style="bold")
+                weather_table.add_column("Location / Time (Local)", style="bold")
                 weather_table.add_column("Forecast Temp", style="cyan")
                 weather_table.add_column("Condition", style="yellow")
                 weather_table.add_column("Precip %", style="blue")
-
-                now = datetime.now(timezone.utc)
-                et_zone = ZoneInfo("America/New_York")
 
                 with console.status(
                     "[bold green]Fetching forecast along route...[/bold green]"
                 ):
                     for offset, lat, lng, desc in samples:
-                        target_time_utc = now + timedelta(seconds=offset)
+                        # Determine LOCAL Timezone for this point
+                        local_tz_str = get_timezone_at_point(lat, lng)
+                        local_tz = ZoneInfo(local_tz_str)
+                        
+                        # Target UTC time for API lookup
+                        # Start Time (Aware) + Offset
+                        target_time_aware = start_dt + timedelta(seconds=offset)
+                        target_time_utc = target_time_aware.astimezone(timezone.utc)
 
                         # Fetch Hourly Forecast
                         forecast_data = requester.get_hourly_forecast(lat, lng)
@@ -483,10 +541,14 @@ def route(
                                 .get("percent", 0)
                             )
 
-                            # Format time label in Eastern Time
-                            target_time_et = target_time_utc.astimezone(et_zone)
-                            local_time_str = target_time_et.strftime("%I:%M %p")
-                            label = f"{desc}\n[dim]{local_time_str}[/dim]"
+                            # Format display time in LOCAL timezone of the point
+                            local_display_time = target_time_utc.astimezone(local_tz)
+                            local_time_str = local_display_time.strftime("%I:%M %p")
+                            # Add timezone abbr (e.g. EST, CST) if helpful, or just TZ name?
+                            # Abbr is cleaner. %Z
+                            tz_abbr = local_display_time.strftime("%Z")
+                            
+                            label = f"{desc}\n[dim]{local_time_str} {tz_abbr}[/dim]"
 
                             weather_table.add_row(
                                 label, temp_str, condition, f"{precip}%"
@@ -495,6 +557,27 @@ def route(
                             weather_table.add_row(desc, "No Data", "-", "-")
 
                 console.print(weather_table)
+
+            # --- Elevation Profile ---
+            if elevation and encoded_polyline:
+                console.print("\n[bold]Elevation Profile:[/bold]")
+                with console.status("[bold green]Fetching elevation data...[/bold green]"):
+                    # Use 60 samples for the ASCII chart width (default width=60)
+                    elevation_data = requester.get_elevation_along_path(encoded_polyline, samples=60)
+                    if elevation_data:
+                        # Extract elevation values (in meters) and convert to feet
+                        elevations = [p.get("elevation", 0) * 3.28084 for p in elevation_data]
+                        
+                        min_elev = min(elevations)
+                        max_elev = max(elevations)
+                        gain = max_elev - min_elev # Simple range, not cumulative gain
+                        
+                        console.print(f"Max: {int(max_elev)} ft | Min: {int(min_elev)} ft | Range: {int(gain)} ft")
+                        
+                        chart = generate_ascii_chart(elevations, height=10)
+                        console.print(chart)
+                    else:
+                        console.print("[yellow]Could not fetch elevation data.[/yellow]")
 
             # --- Search Along Route ---
             if find and encoded_polyline:
