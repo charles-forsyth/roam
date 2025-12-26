@@ -173,7 +173,7 @@ class RouteRequester:
     def get_elevation_along_path(self, encoded_polyline: str, samples: int = 50) -> List[Dict[str, Any]]:
         """
         Fetches elevation data for sampled points along a polyline.
-        Decodes polyline locally and samples points to avoid API path limits.
+        Decodes polyline locally and samples points, then sends via GET using 'locations'.
         """
         # Decode polyline
         all_points = decode_polyline(encoded_polyline)
@@ -191,26 +191,21 @@ class RouteRequester:
                 idx = min(int(i * step), len(all_points) - 1)
                 selected_points.append(all_points[idx])
             
-        # POST Body:
-        # { "locations": [ {"lat": ..., "lng": ...}, ... ] }
-        
-        locations_payload = [
-            {"lat": p["latitude"], "lng": p["longitude"]} 
-            for p in selected_points
-        ]
+        # Format for GET: locations=lat,lng|lat,lng|...
+        locations_str = "|".join([f"{p['latitude']},{p['longitude']}" for p in selected_points])
         
         params = {
+            "locations": locations_str,
             "key": self.api_key
         }
         
-        payload = {
-            "locations": locations_payload
-        }
-        
-        headers = {"Content-Type": "application/json"}
+        # Remove Content-Type for GET
+        headers = self.session.headers.copy()
+        if "Content-Type" in headers:
+            del headers["Content-Type"]
             
         try:
-            response = requests.post(self.ELEVATION_BASE_URL, params=params, json=payload, headers=headers, timeout=10)
+            response = requests.get(self.ELEVATION_BASE_URL, params=params, headers=headers, timeout=10)
             response.raise_for_status()
             data = response.json()
             
