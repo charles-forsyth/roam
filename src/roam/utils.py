@@ -1,4 +1,17 @@
 from math import radians, cos, sin, asin, sqrt
+from timezonefinder import TimezoneFinder
+
+# Initialize once (heavy)
+tf = TimezoneFinder()
+
+def get_timezone_at_point(lat, lng):
+    """
+    Returns the IANA timezone string (e.g. 'America/New_York') for a lat/lng.
+    """
+    try:
+        return tf.timezone_at(lat=lat, lng=lng) or "UTC"
+    except Exception:
+        return "UTC"
 
 def decode_polyline(polyline_str):
     """Decodes a Polyline string into a list of lat/lng dicts."""
@@ -80,6 +93,7 @@ def get_nearest_point_on_polyline(point_lat, point_lng, polyline_points):
     min_dist = float("inf")
     best_index = -1
     
+    # We check every vertex. 
     for i, p in enumerate(polyline_points):
         d = haversine_distance(point_lat, point_lng, p["latitude"], p["longitude"])
         if d < min_dist:
@@ -122,18 +136,11 @@ def generate_ascii_chart(data, height=10, width=60):
     grid = [[' ' for _ in range(len(data))] for _ in range(height)]
     
     for x, y in enumerate(normalized):
-        # Invert y for drawing (0 is top in list, but we want 0 at bottom visually)
-        grid[height - 1 - y][x] = '•' # Character for point
-        
-        # Draw line down to fill area? Or just line?
-        # Let's do simple line/points
-        
-        # Connect points with simple slope char if possible, but dot is robust.
+        grid[height - 1 - y][x] = '•' 
     
     # Build string
     lines = []
     
-    # Y-axis labels
     label_step = range_val / (height - 1)
     
     for y in range(height):
@@ -142,7 +149,6 @@ def generate_ascii_chart(data, height=10, width=60):
         row_str = "".join(grid[y])
         lines.append(f"{label} {row_str}")
         
-    # X-axis
     lines.append(f"      0 +{'-' * len(data)}")
     
     return "\n".join(lines)
