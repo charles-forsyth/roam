@@ -1,8 +1,10 @@
-# Roam 🗺️
+# <img src="assets/logo.png" width="100" height="100" align="left" style="margin-right: 20px;"> Roam 🗺️
 
 **The Personal Routing Commander.**
 
 Roam is a CLI tool designed to generate the perfect route for **your specific vehicle** and **current intent**. It uses the Google Maps Routes API v2 to calculate paths based on engine type, travel mode, and personal preferences.
+
+<br clear="left"/>
 
 ## Features
 
@@ -11,8 +13,11 @@ Roam is a CLI tool designed to generate the perfect route for **your specific ve
 *   **🧭 Smart Routing:** Supports `drive`, `bicycle`, `two_wheeler`, `transit`, and `walk`.
 *   **🔋 Eco-Aware:** Optimizes for engine type (`gasoline`, `electric`, `hybrid`, `diesel`).
 *   **🗣️ Turn-by-Turn:** Get detailed directions directly in your terminal.
-*   **🔍 Search Along Route:** Find "gas", "coffee", or "EV charging" without leaving your path.
-*   **☀️ Weather Aware:** Check current conditions at your origin and destination.
+*   **🔍 Search Along Route:** Find "gas", "coffee", or "EV charging" without leaving your path (Segmented Search for full coverage).
+*   **☀️ Weather Aware:** Check hourly weather forecast for points along the route (Time-zone aware).
+*   **⛰️ Elevation Profile:** Visualize the terrain with an ASCII elevation chart.
+*   **💰 Trip Costs:** See real fuel prices and estimated trip costs.
+*   **📤 Sharing:** Generate Google Maps URLs and HTML reports.
 
 ## Installation
 
@@ -27,7 +32,8 @@ uv tool install git+https://github.com/charles-forsyth/roam.git
 1.  **Get a Google Maps API Key**: Ensure the following APIs are enabled:
     *   **Routes API**
     *   **Places API (New)**
-    *   **Weather API** (optional, for weather features)
+    *   **Weather API** (optional)
+    *   **Elevation API** (optional)
 2.  **Set the Key**:
     *   Create `~/.config/roam/.env` and add: `GOOGLE_MAPS_API_KEY=your_key_here`
     *   OR export it: `export GOOGLE_MAPS_API_KEY=your_key_here`
@@ -51,11 +57,20 @@ roam "Home" -d
 
 ### 🔍 Search & Weather
 ```bash
-# Find places along the route
-roam "Las Vegas" -F "gas" -F "mcdonalds"
+# Find places along the route (e.g. gas)
+roam "Las Vegas" -F "gas"
 
 # Check weather conditions
 roam "Seattle" -W
+```
+
+### ⛰️ Elevation & Reports
+```bash
+# View Elevation Profile
+roam "Lake Tahoe" -E
+
+# Export HTML Report
+roam "Portland" --html
 ```
 
 ### 🏎️ Managing Your Garage
