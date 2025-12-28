@@ -587,6 +587,7 @@ def route(
                                 is_daily = True
 
                         if match:
+                            qpf_mm = 0.0
                             if not is_daily:
                                 temp_c = match.get("temperature", {}).get("degrees")
                                 condition = (
@@ -594,10 +595,15 @@ def route(
                                     .get("description", {})
                                     .get("text", "Unknown")
                                 )
-                                precip = (
+                                precip_prob = (
                                     match.get("precipitation", {})
                                     .get("probability", {})
                                     .get("percent", 0)
+                                )
+                                qpf_mm = (
+                                    match.get("precipitation", {})
+                                    .get("qpf", {})
+                                    .get("quantity", 0.0)
                                 )
                             else:
                                 # Daily forecast has day/night and max/min temps
@@ -612,11 +618,16 @@ def route(
                                     "description", {}
                                 ).get("text", "Unknown")
 
-                                precip = daytime.get("precipitation", {}).get(
+                                precip_prob = daytime.get("precipitation", {}).get(
                                     "probability", {}
                                 ).get("percent") or match.get(
                                     "maxPrecipitationProbability", {}
                                 ).get("percent", 0)
+                                qpf_mm = (
+                                    daytime.get("precipitation", {})
+                                    .get("qpf", {})
+                                    .get("quantity", 0.0)
+                                )
 
                             temp_f = (
                                 (temp_c * 9 / 5) + 32 if temp_c is not None else None
@@ -624,6 +635,14 @@ def route(
                             temp_str = f"{temp_f:.1f}°F" if temp_f else "N/A"
                             if is_daily:
                                 temp_str += " (avg)"
+
+                            # Format Precipitation
+                            precip_str = f"{precip_prob}%"
+                            if qpf_mm > 0:
+                                # Convert mm to inches
+                                qpf_in = qpf_mm / 25.4
+                                if qpf_in >= 0.01:
+                                    precip_str += f" ({qpf_in:.2f} in)"
 
                             # Format display time in LOCAL timezone of the point
                             local_display_time = target_time_utc.astimezone(local_tz)
@@ -636,7 +655,7 @@ def route(
                             label += "[/dim]"
 
                             weather_table.add_row(
-                                label, temp_str, condition, f"{precip}%"
+                                label, temp_str, condition, precip_str
                             )
                         else:
                             weather_table.add_row(desc, "No Data", "-", "-")
