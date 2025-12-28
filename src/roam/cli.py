@@ -560,13 +560,25 @@ def route(
                         target_time_aware = start_dt + timedelta(seconds=offset)
                         target_time_utc = target_time_aware.astimezone(timezone.utc)
 
-                        # Fetch Hourly Forecast
-                        forecast_data = requester.get_hourly_forecast(lat, lng)
-                        match = find_forecast_for_time(forecast_data, target_time_utc)
+                        # Determine if we should prioritize Daily Forecast (for > 24h ahead)
+                        now_utc = datetime.now(timezone.utc)
+                        # We use a 24-hour threshold
+                        is_distant_future = (
+                            target_time_utc - now_utc
+                        ).total_seconds() > 86400
 
+                        match = None
                         is_daily = False
+
+                        if not is_distant_future:
+                            # Fetch Hourly Forecast
+                            forecast_data = requester.get_hourly_forecast(lat, lng)
+                            match = find_forecast_for_time(
+                                forecast_data, target_time_utc
+                            )
+
                         if not match:
-                            # Fallback to Daily Forecast
+                            # Fallback to Daily Forecast (or primary if distant future)
                             daily_data = requester.get_daily_forecast(lat, lng)
                             match = find_daily_forecast_for_date(
                                 daily_data, target_time_aware.date()
