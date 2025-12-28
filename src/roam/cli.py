@@ -601,15 +601,18 @@ def route(
                                 )
                             else:
                                 # Daily forecast has day/night and max/min temps
-                                day_stats = match.get("day") or {}
                                 # Use maxTemperature as the representative temp for the day
                                 temp_c = match.get("maxTemperature", {}).get("degrees")
-                                condition = day_stats.get("weatherCondition", {}).get(
+
+                                # Extract condition from daytimeForecast (preferred) or fallbacks
+                                daytime = match.get("daytimeForecast", {})
+                                condition = daytime.get("weatherCondition", {}).get(
                                     "description", {}
                                 ).get("text") or match.get("weatherCondition", {}).get(
                                     "description", {}
                                 ).get("text", "Unknown")
-                                precip = day_stats.get("precipitation", {}).get(
+
+                                precip = daytime.get("precipitation", {}).get(
                                     "probability", {}
                                 ).get("percent") or match.get(
                                     "maxPrecipitationProbability", {}
