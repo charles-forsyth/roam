@@ -492,7 +492,7 @@ def route(
         route_data = requester.compute_route(
             origin=origin,
             destination=destination,
-            travel_mode=mode,
+            mode=mode,
             engine_type=engine,
             avoid_tolls=avoid_tolls,
             avoid_highways=avoid_highways,
@@ -526,8 +526,8 @@ def route(
             cum_dists = calculate_cumulative_distances(route_points)
             for query in find:
                 console.print(f"\n[bold cyan]Searching for '{query}'...[/]")
-                places_found = requester.search_places_along_route(
-                    route_points, query, max_results=10
+                places_found = requester.search_along_route(
+                    query, polyline if polyline else ""
                 )
                 if not places_found:
                     console.print(f"[dim]No places found for '{query}'.[/dim]")
