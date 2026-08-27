@@ -540,24 +540,10 @@ def route(
                     plng = loc.get("longitude")
 
                     if plat and plng:
-                        pt_idx, path_dist = get_nearest_point_on_polyline(
-                            plat, plng, route_points, cum_dists
+                        detour_m, pt_idx = get_nearest_point_on_polyline(
+                            plat, plng, route_points
                         )
-                        route_pt = route_points[pt_idx]
-                        from math import radians, cos, sin, asin, sqrt
-
-                        lat1, lon1, lat2, lon2 = map(
-                            radians,
-                            [plat, plng, route_pt["latitude"], route_pt["longitude"]],
-                        )
-                        dlon = lon2 - lon1
-                        dlat = lat2 - lat1
-                        a = (
-                            sin(dlat / 2) ** 2
-                            + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-                        )
-                        c = 2 * asin(sqrt(a))
-                        detour_m = 6371000 * c
+                        path_dist = cum_dists[pt_idx]
 
                         annotated.append(
                             {
