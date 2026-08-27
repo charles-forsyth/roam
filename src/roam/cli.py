@@ -516,8 +516,7 @@ def route(
 
         # Decode polyline for spatial features
         polyline = primary_route.get("polyline", {}).get("encodedPolyline")
-        route_points_dicts = decode_polyline(polyline) if polyline else []
-        route_points = [(p["latitude"], p["longitude"]) for p in route_points_dicts]
+        route_points = decode_polyline(polyline) if polyline else []
 
         # Find gas price automatically if -F gas is used
         discovered_gas_price = None
@@ -542,13 +541,14 @@ def route(
 
                     if plat and plng:
                         pt_idx, path_dist = get_nearest_point_on_polyline(
-                            (plat, plng), route_points, cum_dists
+                            plat, plng, route_points, cum_dists
                         )
                         route_pt = route_points[pt_idx]
                         from math import radians, cos, sin, asin, sqrt
 
                         lat1, lon1, lat2, lon2 = map(
-                            radians, [plat, plng, route_pt[0], route_pt[1]]
+                            radians,
+                            [plat, plng, route_pt["latitude"], route_pt["longitude"]],
                         )
                         dlon = lon2 - lon1
                         dlat = lat2 - lat1
@@ -689,7 +689,9 @@ def route(
         # Weather Forecast
         if weather and route_points:
             console.print("\n[bold cyan]Fetching weather forecast along route...[/]")
-            origin_tz = get_timezone_at_point(route_points[0][0], route_points[0][1])
+            origin_tz = get_timezone_at_point(
+                route_points[0]["latitude"], route_points[0]["longitude"]
+            )
             departure_dt = parse_start_time(start, date, origin_tz)
 
             console.print(
@@ -725,10 +727,10 @@ def route(
                 frac = idx / (len(route_points) - 1) if len(route_points) > 1 else 0
                 point_dt = departure_dt + timedelta(seconds=total_dur_sec * frac)
 
-                point_tz = get_timezone_at_point(pt[0], pt[1])
+                point_tz = get_timezone_at_point(pt["latitude"], pt["longitude"])
                 local_dt = point_dt.astimezone(ZoneInfo(point_tz))
 
-                w_data = requester.get_weather_forecast(pt[0], pt[1])
+                w_data = requester.get_weather_forecast(pt["latitude"], pt["longitude"])
                 if w_data:
                     fc = find_forecast_for_time(w_data, point_dt)
                     if fc:
