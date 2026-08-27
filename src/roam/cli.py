@@ -516,7 +516,8 @@ def route(
 
         # Decode polyline for spatial features
         polyline = primary_route.get("polyline", {}).get("encodedPolyline")
-        route_points = decode_polyline(polyline) if polyline else []
+        route_points_dicts = decode_polyline(polyline) if polyline else []
+        route_points = [(p["latitude"], p["longitude"]) for p in route_points_dicts]
 
         # Find gas price automatically if -F gas is used
         discovered_gas_price = None
