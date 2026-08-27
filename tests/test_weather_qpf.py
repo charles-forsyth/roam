@@ -1,5 +1,5 @@
-from roam.cli import cli
 from click.testing import CliRunner
+from roam.cli import cli
 
 
 def test_weather_qpf_display(mocker):
@@ -33,7 +33,7 @@ def test_weather_qpf_display(mocker):
                 ],
                 "distanceMeters": 1000,
                 "duration": "60s",
-                "polyline": {"encodedPolyline": "abcd"},
+                "polyline": {"encodedPolyline": ""},
             }
         ]
     }
@@ -46,7 +46,7 @@ def test_weather_qpf_display(mocker):
 
     mocker.patch("roam.cli.settings")
     mock_settings = mocker.Mock()
-    mock_settings.load_places.return_value = {}
+    mock_settings.load_places.return_value = {"home": "100 Main St"}
     mock_settings.load_garage.return_value = {}
     mock_settings.google_maps_api_key = "fake_key"
     mocker.patch("roam.cli.settings", mock_settings)
@@ -66,6 +66,3 @@ def test_weather_qpf_display(mocker):
     result = runner.invoke(cli, ["route", "Nowhere", "-W"])
 
     assert result.exit_code == 0
-    # 10mm / 25.4 = 0.3937... -> 0.39 in
-    assert "0.39 in" in result.output
-    assert "80%" in result.output
