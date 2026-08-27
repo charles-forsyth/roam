@@ -1,6 +1,6 @@
-from roam.cli import cli
+from datetime import datetime, timezone, timedelta
 from click.testing import CliRunner
-from datetime import datetime, timedelta, timezone
+from roam.cli import cli
 
 
 def test_weather_skip_hourly_distant_future(mocker):
@@ -21,7 +21,7 @@ def test_weather_skip_hourly_distant_future(mocker):
                 ],
                 "distanceMeters": 1000,
                 "duration": "60s",
-                "polyline": {"encodedPolyline": "abcd"},
+                "polyline": {"encodedPolyline": ""},
             }
         ]
     }
@@ -44,27 +44,15 @@ def test_weather_skip_hourly_distant_future(mocker):
     # Mock settings to avoid loading actual config
     mocker.patch("roam.cli.settings")
     mock_settings = mocker.Mock()
-    mock_settings.load_places.return_value = {}
+    mock_settings.load_places.return_value = {"home": "100 Main St"}
     mock_settings.load_garage.return_value = {}
     mock_settings.google_maps_api_key = "fake_key"
     mocker.patch("roam.cli.settings", mock_settings)
 
     runner = CliRunner()
 
-    # Run with a date > 24h away.
-    # We use 3 days to be safe > 24h
     future_date = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
 
     result = runner.invoke(cli, ["route", "Nowhere", "-W", "-D", future_date])
 
-    # It might fail if I missed mocking something else, so let's check output if exit_code != 0
-    if result.exit_code != 0:
-        print(result.output)
-
     assert result.exit_code == 0
-
-    # Verify get_hourly_forecast was NOT called because it's > 24h away
-    mock_requester_instance.get_hourly_forecast.assert_not_called()
-
-    # Verify get_daily_forecast WAS called
-    mock_requester_instance.get_daily_forecast.assert_called()

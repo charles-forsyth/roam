@@ -14,15 +14,16 @@ def test_places_add_and_list(mocker):
     # 1. Test Add
     result = runner.invoke(cli, ["places", "add", "home", "123 Main St"])
     assert result.exit_code == 0
-    assert "Added home" in result.output
+    assert "Saved place 'home'" in result.output
 
-    # Verify save was called
+    # Verify save was called with correct data
     args, _ = mock_save.call_args
     assert "home" in args[0]
     assert args[0]["home"] == "123 Main St"
 
-    # 2. Test List
+    # 2. Test List (mocking the data returning)
     mock_load.return_value = {"home": "123 Main St"}
     result_list = runner.invoke(cli, ["places", "list"])
     assert result_list.exit_code == 0
+    assert "home" in result_list.output
     assert "123 Main St" in result_list.output

@@ -1,44 +1,67 @@
 from click.testing import CliRunner
-from roam.cli import cli, format_duration, find_daily_forecast_for_date
-from datetime import date
+from roam.cli import cli
+from roam.config import VehicleConfig
 
 
-def test_cli_help():
+def test_doordash_command():
     runner = CliRunner()
-    result = runner.invoke(cli, ["--help"])
+    result = runner.invoke(
+        cli,
+        [
+            "doordash",
+            "--start",
+            "Corning NY",
+            "--end",
+            "Tioga PA",
+            "--miles",
+            "78.9",
+            "--earnings",
+            "22.30",
+            "--gas-price",
+            "3.99",
+            "--mpg",
+            "40.6",
+        ],
+    )
     assert result.exit_code == 0
-    assert "Roam: The Personal Routing Commander" in result.output
-
-    result_route = runner.invoke(cli, ["route", "--help"])
-    assert result_route.exit_code == 0
-    assert "step-by-step navigation instructions" in result_route.output
+    assert "DoorDash Shift IRS Tax Shelter" in result.output
+    assert "78.9 Miles" in result.output
+    assert "NET TAX SHELTER GAIN" in result.output
 
 
-def test_format_duration():
-    assert format_duration("3600s") == "1h 0m"
-    assert format_duration("60s") == "1m"
-    assert format_duration("invalid") == "invalid"
+def test_compare_and_econ_options(mocker):
+    mock_requester_cls = mocker.patch("roam.cli.RouteRequester")
+    mock_requester_instance = mock_requester_cls.return_value
 
-
-def test_find_daily_forecast_for_date():
-    mock_data = {
-        "forecastDays": [
+    mock_requester_instance.compute_route.return_value = {
+        "routes": [
             {
-                "interval": {"startTime": "2026-01-01T00:00:00Z"},
-                "maxTemperature": {"degrees": 20},
-            },
-            {
-                "interval": {"startTime": "2026-01-02T00:00:00Z"},
-                "maxTemperature": {"degrees": 25},
-            },
+                "legs": [],
+                "distanceMeters": 16093,  # 10 miles
+                "duration": "600s",
+                "polyline": {"encodedPolyline": ""},
+            }
         ]
     }
 
-    target = date(2026, 1, 1)
-    match = find_daily_forecast_for_date(mock_data, target)
-    assert match is not None
-    assert match["maxTemperature"]["degrees"] == 20
+    mock_settings = mocker.Mock()
+    mock_settings.load_places.return_value = {"home": "100 Main St"}
+    mock_settings.load_garage.return_value = {
+        "SCRV": VehicleConfig(
+            mode="drive",
+            engine="hybrid",
+            avoid_tolls=True,
+            avoid_highways=False,
+            avoid_ferries=False,
+            mpg=36.0,
+            mpg_econ=44.0,
+        )
+    }
+    mock_settings.google_maps_api_key = "fake_key"
+    mocker.patch("roam.cli.settings", mock_settings)
 
-    target_missing = date(2026, 1, 3)
-    match_missing = find_daily_forecast_for_date(mock_data, target_missing)
-    assert match_missing is None
+    runner = CliRunner()
+    result = runner.invoke(cli, ["route", "Nowhere", "--compare", "--econ"])
+    assert result.exit_code == 0
+    assert "Multi-Vehicle Fleet Comparison" in result.output
+    assert "SCRV" in result.output

@@ -11,7 +11,7 @@ from roam.utils import (
     generate_ascii_chart,
     get_timezone_at_point,
 )
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import sys
 import urllib.parse
@@ -29,18 +29,18 @@ class DefaultGroup(click.Group):
         super().__init__(*args, **kwargs)
 
     def resolve_command(self, ctx, args):
-        try:
+        if args and args[0] in self.commands:
             return super().resolve_command(ctx, args)
-        except click.UsageError:
-            if self.default_command:
-                # We need to return the default command name, the command object, and the full args
-                return (
-                    self.default_command,
-                    self.get_command(ctx, self.default_command),
-                    args,
-                )
-            else:
-                raise
+
+        if self.default_command and args and not args[0].startswith("-"):
+            # If the first argument is not a flag and not a subcommand, treat as default command
+            return (
+                self.default_command,
+                self.get_command(ctx, self.default_command),
+                args,
+            )
+
+        return super().resolve_command(ctx, args)
 
 
 @click.group(
@@ -93,8 +93,8 @@ def format_price_level(level):
     return mapping.get(level, level) if level else "-"
 
 
-def get_fuel_price(place):
-    """Extracts Regular Unleaded price if available."""
+def get_fuel_price_float(place):
+    """Extracts Regular Unleaded float price if available."""
     fuel_options = place.get("fuelOptions", {})
     prices = fuel_options.get("fuelPrices", [])
 
@@ -103,14 +103,16 @@ def get_fuel_price(place):
             price_obj = p.get("price", {})
             units = int(price_obj.get("units", 0))
             nanos = int(price_obj.get("nanos", 0))
-            currency = price_obj.get("currencyCode", "USD")
+            return units + (nanos / 1_000_000_000)
 
-            # Construct float
-            val = units + (nanos / 1_000_000_000)
+    return None
 
-            symbol = "$" if currency == "USD" else currency + " "
-            return f"{symbol}{val:.2f}"
 
+def get_fuel_price(place):
+    """Extracts Regular Unleaded price if available."""
+    val = get_fuel_price_float(place)
+    if val is not None:
+        return f"${val:.2f}"
     return None
 
 
@@ -198,138 +200,185 @@ def parse_start_time(start_str, date_str, origin_tz_str):
     now = datetime.now(tz)
 
     target_date = now.date()
-    target_time = now.time()
 
     if date_str:
-        if date_str.lower() == "tomorrow":
-            target_date = now.date() + timedelta(days=1)
-        elif date_str.lower() == "today":
+        if date_str.lower() == "today":
             target_date = now.date()
+        elif date_str.lower() == "tomorrow":
+            target_date = now.date() + timedelta(days=1)
         else:
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                # Try MM-DD
-                try:
-                    # Assume current year
-                    dt = datetime.strptime(date_str, "%m-%d")
-                    target_date = dt.date().replace(year=now.year)
-                except ValueError:
-                    console.print(
-                        f"[yellow]Could not parse date '{date_str}'. Using today.[/yellow]"
-                    )
+                raise click.BadParameter(
+                    f"Invalid date format: {date_str}. Use YYYY-MM-DD, 'today', or 'tomorrow'."
+                )
 
     if start_str:
-        # Try various formats
-        formats = ["%H:%M", "%I:%M %p", "%I:%M%p"]
-        parsed = None
-        for fmt in formats:
+        # Try parsing various time formats
+        parsed_time = None
+        time_formats = [
+            "%H:%M",
+            "%I:%M %p",
+            "%I:%M%p",
+            "%I %p",
+            "%I%p",
+        ]  # e.g., 14:30, 02:30 PM, 2:30pm, 2 PM, 2pm
+
+        start_str_clean = start_str.strip()
+        for fmt in time_formats:
             try:
-                parsed = datetime.strptime(start_str, fmt).time()
+                parsed_time = datetime.strptime(start_str_clean, fmt).time()
                 break
             except ValueError:
-                pass
+                continue
 
-        if parsed:
-            target_time = parsed
-        else:
-            console.print(
-                f"[yellow]Could not parse time '{start_str}'. Using now.[/yellow]"
+        if not parsed_time:
+            raise click.BadParameter(
+                f"Invalid start time format: {start_str}. Use 'HH:MM' or '02:30 PM'."
             )
 
-    # Combine
-    start_dt = datetime.combine(target_date, target_time).replace(tzinfo=tz)
+        departure_dt = datetime.combine(target_date, parsed_time, tzinfo=tz)
+    else:
+        if date_str:
+            # Date specified without time: default to 08:00 AM on that date
+            default_time = datetime.strptime("08:00", "%H:%M").time()
+            departure_dt = datetime.combine(target_date, default_time, tzinfo=tz)
+        else:
+            departure_dt = now
 
-    # If the combined time is in the past (and date wasn't explicit), maybe they meant tomorrow?
-    # e.g. it's 9 PM, user says "8 AM". Usually means next day.
-    # But explicit date overrides this.
-    # Let's keep it simple: strict interpretation.
-
-    return start_dt
+    return departure_dt
 
 
-@cli.command(context_settings={"help_option_names": ["-h", "--help"]})
+def get_mpg_for_vehicle(v_name: str, v_cfg: VehicleConfig, econ_mode: bool) -> float:
+    """Helper to determine effective MPG for a vehicle."""
+    if econ_mode and v_cfg.mpg_econ:
+        return v_cfg.mpg_econ
+    if v_cfg.mpg:
+        return v_cfg.mpg
+    # Defaults based on vehicle name / mode
+    if "Rig" in v_name or "Towing" in v_name:
+        return 9.5
+    if "Daytona" in v_name or "Truck" in v_name:
+        return 11.0
+    if "CRV" in v_name or "SCRV" in v_name or "WCRV" in v_name:
+        return 44.0 if econ_mode else 36.0
+    return 25.0
+
+
+@cli.command()
 @click.argument("destination")
 @click.option(
-    "--origin",
     "-f",
     "-o",
+    "--origin",
+    default=None,
     help="Starting point (address or saved place). Defaults to 'home' if set.",
-    default="home",
 )
 @click.option(
-    "--mode",
     "-m",
+    "--mode",
     type=click.Choice(["drive", "bicycle", "two_wheeler", "transit", "walk"]),
-    help="Travel mode (default: drive).\nExample: -m bicycle",
+    default="drive",
+    help="Travel mode (default: drive). Example: -m bicycle",
 )
 @click.option(
-    "--engine",
     "-e",
+    "--engine",
     type=click.Choice(["gasoline", "electric", "hybrid", "diesel"]),
-    help="Vehicle engine type for eco-routing (only for drive mode).\nExample: -e electric",
+    default=None,
+    help="Vehicle engine type for eco-routing (only for drive mode). Example: -e electric",
 )
 @click.option(
-    "--avoid-tolls",
     "-t",
+    "--avoid-tolls",
     is_flag=True,
+    default=False,
     help="Avoid toll roads where possible.",
 )
 @click.option(
-    "--avoid-highways",
     "-H",
+    "--avoid-highways",
     is_flag=True,
+    default=False,
     help="Avoid highways (good for scooters/scenic routes).",
 )
 @click.option(
-    "--with",
     "-w",
-    "vehicle_alias",
-    help="Load settings from a saved vehicle in your garage.\nExample: --with tesla",
+    "--with",
+    "vehicle_name",
+    default=None,
+    help="Load settings from a saved vehicle in your garage. Example: --with SCRV",
 )
 @click.option(
-    "--directions",
-    "-d",
+    "-C",
+    "--compare",
     is_flag=True,
+    default=False,
+    help="Compare travel time, fuel burned, and cost across all garaged vehicles.",
+)
+@click.option(
+    "-P",
+    "--gas-price",
+    type=float,
+    default=None,
+    help="Gas price per gallon for trip cost calculation (default: $3.99 or auto-discovered).",
+)
+@click.option(
+    "--econ/--normal",
+    default=False,
+    help="Toggle Econ drive mode for hybrid vehicles (e.g. 44 MPG vs 36 MPG).",
+)
+@click.option(
+    "-d",
+    "--directions",
+    is_flag=True,
+    default=False,
     help="Display step-by-step navigation instructions.",
 )
 @click.option(
-    "--find",
     "-F",
+    "--find",
     multiple=True,
-    help="Search for places along the route path. Can be used multiple times.\nExample: -F gas -F coffee",
+    help="Search for places along the route path. Can be used multiple times. Example: -F gas -F coffee",
 )
 @click.option(
-    "--weather",
     "-W",
+    "--weather",
     is_flag=True,
+    default=False,
     help="Fetch hourly weather forecast for points along the route.",
 )
 @click.option(
-    "--start",
     "-s",
+    "--start",
+    default=None,
     help="Departure time (e.g. '08:00 AM' or '14:30'). Defaults to now.",
 )
 @click.option(
-    "--date",
     "-D",
+    "--date",
+    default=None,
     help="Departure date (e.g. '2025-12-25' or 'tomorrow'). Defaults to today.",
 )
 @click.option(
-    "--elevation",
     "-E",
+    "--elevation",
     is_flag=True,
+    default=False,
     help="Display elevation profile chart for the route.",
 )
 @click.option(
-    "--url",
     "-u",
+    "--url",
     is_flag=True,
+    default=False,
     help="Generate a Google Maps URL for this route.",
 )
 @click.option(
     "--html",
     is_flag=True,
+    default=False,
     help="Export the route report to 'roam_report.html'.",
 )
 def route(
@@ -339,7 +388,10 @@ def route(
     engine,
     avoid_tolls,
     avoid_highways,
-    vehicle_alias,
+    vehicle_name,
+    compare,
+    gas_price,
+    econ,
     directions,
     find,
     weather,
@@ -350,643 +402,635 @@ def route(
     html,
 ):
     """
+    \b
     Calculate a route to DESTINATION.
 
-    DESTINATION can be a city ("Los Angeles"), an address ("123 Main St"),
-    or a saved place name ("work").
+    DESTINATION can be a city ("Los Angeles"), an address ("123 Main St"), or a saved place name ("work").
 
     \b
     Examples:
       roam "New York"
       roam "Gym" --origin "Work"
       roam "Seattle" -W -s "08:00 AM" -D "tomorrow"
+      roam "Brushwood" --with Daytona-Rig -F gas -F coffee
+      roam "Trumansburg" --compare
     """
-    if not settings:
+    if settings is None:
         console.print(
-            "[bold red]Configuration Error:[/bold red] Could not load settings."
+            "[bold red]Error:[/] Settings not initialized. Check your GOOGLE_MAPS_API_KEY environment variable."
         )
         sys.exit(1)
 
-    # Resolve Places
     places = settings.load_places()
+    garage = settings.load_garage()
 
-    # Resolve Origin
-    final_origin = origin
-    if origin in places:
-        final_origin = places[origin]
-        console.print(f"[dim]Resolved origin '{origin}' to: {final_origin}[/dim]")
-    elif origin == "home" and "home" not in places:
-        console.print(
-            "[yellow]No 'home' preset found. Using default (New York, NY).[/yellow]"
-        )
-        final_origin = "New York, NY"
-
-    # Resolve Destination
-    final_dest = destination
-    if destination in places:
-        final_dest = places[destination]
-        console.print(
-            f"[dim]Resolved destination '{destination}' to: {final_dest}[/dim]"
-        )
-
-    # Load defaults
-    final_mode = "drive"
-    final_engine = None
-    final_avoid_tolls = False
-    final_avoid_highways = False
-
-    if vehicle_alias:
-        garage = settings.load_garage()
-        vehicle = garage.get(vehicle_alias)
-        if vehicle:
-            console.print(
-                f"[green]Using garage preset: [bold]{vehicle_alias}[/bold][/green]"
-            )
-            final_mode = vehicle.mode
-            final_engine = vehicle.engine
-            final_avoid_tolls = vehicle.avoid_tolls
-            final_avoid_highways = vehicle.avoid_highways
+    # Resolve origin
+    if not origin:
+        if "home" in places:
+            origin = places["home"]
+            console.print(f"[dim]Resolved origin 'home' to: {origin}[/dim]")
         else:
             console.print(
-                f"[bold red]Vehicle '{vehicle_alias}' not found in garage![/bold red]"
+                "[bold red]Error:[/] No origin specified, and no 'home' place is set. "
+                "Use -f/--origin or set a 'home' place with 'roam places add home <address>'."
             )
             sys.exit(1)
-
-    # 2. Overrides from CLI flags (if provided)
-    if mode:
-        final_mode = mode
-    if engine:
-        final_engine = engine
-    if avoid_tolls:
-        final_avoid_tolls = True
-    if avoid_highways:
-        final_avoid_highways = True
-
-    requester = RouteRequester(api_key=settings.google_maps_api_key)
-
-    status_parts = [f"via [bold green]{final_mode}[/bold green]"]
-    if final_engine:
-        status_parts.append(f"([cyan]{final_engine}[/cyan])")
-    if final_avoid_tolls:
-        status_parts.append("[red]no tolls[/red]")
-    if final_avoid_highways:
-        status_parts.append("[red]no hwys[/red]")
-
-    console.print(
-        Panel(
-            f"Routing from [bold]{origin}[/bold] to [bold cyan]{destination}[/bold cyan] {' '.join(status_parts)}...",
-            title="Roam",
-        )
-    )
-
-    result = requester.compute_route(
-        origin=final_origin,
-        destination=final_dest,
-        mode=final_mode,
-        engine_type=final_engine,
-        avoid_tolls=final_avoid_tolls,
-        avoid_highways=final_avoid_highways,
-    )
-
-    if result:
-        routes = result.get("routes", [])
-        if routes:
-            route_obj = routes[0]
-            duration = route_obj.get("duration", "N/A")
-            distance = route_obj.get("distanceMeters", 0)
-            encoded_polyline = route_obj.get("polyline", {}).get("encodedPolyline", "")
-            miles = int(distance) * 0.000621371
-
-            fmt_duration = format_duration(duration)
-
-            console.print(f"[bold]Distance:[/bold] {miles:.2f} miles")
-            console.print(f"[bold]Duration:[/bold] {fmt_duration}")
-
-            # Get Start Location for Distance Sorting
-            legs = route_obj.get("legs", [])
-            start_lat = None
-            start_lng = None
-            if legs:
-                start_loc = legs[0].get("startLocation", {}).get("latLng", {})
-                start_lat = start_loc.get("latitude")
-                start_lng = start_loc.get("longitude")
-
-            # --- Smart Forecast Weather ---
-            if weather:
-                # 1. Determine Start Time and Timezone
-                # We need start_lat, start_lng to get Origin TZ
-                if start_lat and start_lng:
-                    origin_tz_str = get_timezone_at_point(start_lat, start_lng)
-                else:
-                    origin_tz_str = "UTC"
-
-                # Parse user start time in that timezone
-                start_dt = parse_start_time(start, date, origin_tz_str)
-                console.print(
-                    f"\n[bold]Route Forecast:[/bold] Departing at [cyan]{start_dt.strftime('%Y-%m-%d %I:%M %p')}[/cyan] ({origin_tz_str})"
-                )
-
-                # We want to sample points every ~1 hour (3600s)
-                SAMPLE_INTERVAL = 3600
-
-                current_elapsed = 0
-                last_sample_time = -SAMPLE_INTERVAL  # Force sample at 0
-
-                samples = []  # List of (time_offset, lat, lng, description)
-
-                # Start Point
-                if start_lat:
-                    samples.append(
-                        (
-                            0,
-                            start_lat,
-                            start_lng,
-                            "Start",
-                        )
-                    )
-
-                # Walk the steps to find intermediate points
-                for leg in legs:
-                    for step in leg.get("steps", []):
-                        step_dur = get_seconds(step.get("staticDuration", "0s"))
-
-                        if current_elapsed > last_sample_time + SAMPLE_INTERVAL:
-                            end_loc = step.get("endLocation", {}).get("latLng", {})
-                            if end_loc:
-                                samples.append(
-                                    (
-                                        current_elapsed,
-                                        end_loc.get("latitude"),
-                                        end_loc.get("longitude"),
-                                        f"En Route (+{format_duration(str(current_elapsed) + 's')})",
-                                    )
-                                )
-                                last_sample_time = current_elapsed
-
-                        current_elapsed += step_dur
-
-                # Destination Point
-                total_dur = get_seconds(duration)
-                end_loc = legs[-1].get("endLocation", {}).get("latLng", {})
-                if end_loc:
-                    # Only add if significant time passed since last sample
-                    if total_dur > last_sample_time + (SAMPLE_INTERVAL / 2):
-                        samples.append(
-                            (
-                                total_dur,
-                                end_loc.get("latitude"),
-                                end_loc.get("longitude"),
-                                "Destination",
-                            )
-                        )
-
-                # Fetch Forecasts
-                weather_table = Table(box=None)
-                weather_table.add_column("Location / Time (Local)", style="bold")
-                weather_table.add_column("Forecast Temp", style="cyan")
-                weather_table.add_column("Condition", style="yellow")
-                weather_table.add_column("Precip %", style="blue")
-
-                with console.status(
-                    "[bold green]Fetching forecast along route...[/bold green]"
-                ):
-                    for offset, lat, lng, desc in samples:
-                        # Determine LOCAL Timezone for this point
-                        local_tz_str = get_timezone_at_point(lat, lng)
-                        local_tz = ZoneInfo(local_tz_str)
-
-                        # Target UTC time for API lookup
-                        # Start Time (Aware) + Offset
-                        target_time_aware = start_dt + timedelta(seconds=offset)
-                        target_time_utc = target_time_aware.astimezone(timezone.utc)
-
-                        # Determine if we should prioritize Daily Forecast (for > 24h ahead)
-                        now_utc = datetime.now(timezone.utc)
-                        # We use a 24-hour threshold
-                        is_distant_future = (
-                            target_time_utc - now_utc
-                        ).total_seconds() > 86400
-
-                        match = None
-                        is_daily = False
-
-                        if not is_distant_future:
-                            # Fetch Hourly Forecast
-                            forecast_data = requester.get_hourly_forecast(lat, lng)
-                            match = find_forecast_for_time(
-                                forecast_data, target_time_utc
-                            )
-
-                        if not match:
-                            # Fallback to Daily Forecast (or primary if distant future)
-                            daily_data = requester.get_daily_forecast(lat, lng)
-                            match = find_daily_forecast_for_date(
-                                daily_data, target_time_aware.date()
-                            )
-                            if match:
-                                is_daily = True
-
-                        if match:
-                            qpf_mm = 0.0
-                            if not is_daily:
-                                temp_c = match.get("temperature", {}).get("degrees")
-                                condition = (
-                                    match.get("weatherCondition", {})
-                                    .get("description", {})
-                                    .get("text", "Unknown")
-                                )
-                                precip_prob = (
-                                    match.get("precipitation", {})
-                                    .get("probability", {})
-                                    .get("percent", 0)
-                                )
-                                qpf_mm = (
-                                    match.get("precipitation", {})
-                                    .get("qpf", {})
-                                    .get("quantity", 0.0)
-                                )
-                            else:
-                                # Daily forecast has day/night and max/min temps
-                                # Use maxTemperature as the representative temp for the day
-                                temp_c = match.get("maxTemperature", {}).get("degrees")
-
-                                # Extract condition from daytimeForecast (preferred) or fallbacks
-                                daytime = match.get("daytimeForecast", {})
-                                condition = daytime.get("weatherCondition", {}).get(
-                                    "description", {}
-                                ).get("text") or match.get("weatherCondition", {}).get(
-                                    "description", {}
-                                ).get("text", "Unknown")
-
-                                precip_prob = daytime.get("precipitation", {}).get(
-                                    "probability", {}
-                                ).get("percent") or match.get(
-                                    "maxPrecipitationProbability", {}
-                                ).get("percent", 0)
-                                qpf_mm = (
-                                    daytime.get("precipitation", {})
-                                    .get("qpf", {})
-                                    .get("quantity", 0.0)
-                                )
-
-                            temp_f = (
-                                (temp_c * 9 / 5) + 32 if temp_c is not None else None
-                            )
-                            temp_str = f"{temp_f:.1f}°F" if temp_f else "N/A"
-                            if is_daily:
-                                temp_str += " (avg)"
-
-                            # Format Precipitation
-                            precip_str = f"{precip_prob}%"
-                            if qpf_mm > 0:
-                                # Convert mm to inches
-                                qpf_in = qpf_mm / 25.4
-                                if qpf_in >= 0.01:
-                                    precip_str += f" ({qpf_in:.2f} in)"
-
-                            # Format display time in LOCAL timezone of the point
-                            local_display_time = target_time_utc.astimezone(local_tz)
-                            local_time_str = local_display_time.strftime("%I:%M %p")
-                            tz_abbr = local_display_time.strftime("%Z")
-
-                            label = f"{desc}\n[dim]{local_time_str} {tz_abbr}"
-                            if is_daily:
-                                label += "\n[Daily Forecast]"
-                            label += "[/dim]"
-
-                            weather_table.add_row(
-                                label, temp_str, condition, precip_str
-                            )
-                        else:
-                            weather_table.add_row(desc, "No Data", "-", "-")
-                console.print(weather_table)
-
-            # --- Elevation Profile ---
-            if elevation and encoded_polyline:
-                console.print("\n[bold]Elevation Profile:[/bold]")
-                with console.status(
-                    "[bold green]Fetching elevation data...[/bold green]"
-                ):
-                    # Use 60 samples for the ASCII chart width (default width=60)
-                    elevation_data = requester.get_elevation_along_path(
-                        encoded_polyline, samples=60
-                    )
-                    if elevation_data:
-                        # Extract elevation values (in meters) and convert to feet
-                        elevations = [
-                            p.get("elevation", 0) * 3.28084 for p in elevation_data
-                        ]
-
-                        min_elev = min(elevations)
-                        max_elev = max(elevations)
-                        gain = max_elev - min_elev  # Simple range, not cumulative gain
-
-                        console.print(
-                            f"Max: {int(max_elev)} ft | Min: {int(min_elev)} ft | Range: {int(gain)} ft"
-                        )
-
-                        chart = generate_ascii_chart(elevations, height=10)
-                        console.print(chart)
-                    else:
-                        console.print(
-                            "[yellow]Could not fetch elevation data.[/yellow]"
-                        )
-
-            # --- Search Along Route ---
-            if find and encoded_polyline:
-                console.print("\n[bold]Highlights Along Route:[/bold]")
-
-                # Decode polyline once for Detour calculation
-                route_points = decode_polyline(encoded_polyline)
-
-                # Pre-calculate distances for Trip Mile
-                cumulative_distances = calculate_cumulative_distances(route_points)
-
-                for query in find:
-                    console.print(f"  [dim]Searching for '{query}'...[/dim]")
-                    # We no longer pass origin/routingParams because we calculate trip mile manually
-                    places_list = requester.search_along_route(query, encoded_polyline)
-
-                    if places_list:
-                        # ENRICHMENT
-                        for place in places_list:
-                            # 1. Detour Distance & 2. Trip Mile
-                            loc = place.get("location", {})
-                            lat = loc.get("latitude")
-                            lng = loc.get("longitude")
-
-                            if lat and lng:
-                                # Subsample points for finding nearest point speed
-                                # NOTE: If we subsample, we must map index back to original index for cumulative_distances
-
-                                # Simple optimization: Check every 5th point
-                                STEP = 5
-                                sub_points = route_points[::STEP]
-
-                                detour_mi, sub_index = get_nearest_point_on_polyline(
-                                    lat, lng, sub_points
-                                )
-
-                                # Map sub_index to real index
-                                real_index = sub_index * STEP
-                                if real_index >= len(cumulative_distances):
-                                    real_index = len(cumulative_distances) - 1
-
-                                place["_detour_mi"] = detour_mi
-                                place["_trip_mi"] = cumulative_distances[real_index]
-                            else:
-                                place["_detour_mi"] = float("inf")
-                                place["_trip_mi"] = float("inf")
-
-                        # SORT LOGIC (Sort by Trip Mile)
-                        places_list.sort(key=lambda x: x["_trip_mi"])
-
-                        table = Table(
-                            title=f"{query.capitalize()} Stops (Trip Order)",
-                            show_header=True,
-                            header_style="bold magenta",
-                        )
-                        table.add_column("Trip Mile", style="dim")
-                        table.add_column("Detour", style="red")
-                        table.add_column("Name", style="cyan")
-                        table.add_column("Rating", style="yellow")
-                        table.add_column("Price", style="green")
-                        table.add_column("Address", style="white")
-
-                        # Show all results
-                        for place in places_list:
-                            name = place.get("displayName", {}).get("text", "Unknown")
-                            addr = place.get("formattedAddress", "Unknown Address")
-                            rating = place.get("rating", "N/A")
-                            count = place.get("userRatingCount", 0)
-                            price_level = place.get("priceLevel", "")
-
-                            fuel_price = get_fuel_price(place)
-                            price_display = (
-                                fuel_price
-                                if fuel_price
-                                else format_price_level(price_level)
-                            )
-
-                            # Trip Mile
-                            trip_mi = place.get("_trip_mi", float("inf"))
-                            trip_str = (
-                                f"{trip_mi:.1f} mi" if trip_mi != float("inf") else "-"
-                            )
-
-                            # Detour
-                            detour_mi = place.get("_detour_mi", float("inf"))
-                            detour_str = (
-                                f"+{detour_mi:.1f} mi"
-                                if detour_mi != float("inf")
-                                else "-"
-                            )
-
-                            rating_str = (
-                                f"{rating} ({count})" if rating != "N/A" else "-"
-                            )
-
-                            table.add_row(
-                                trip_str,
-                                detour_str,
-                                name,
-                                rating_str,
-                                str(price_display),
-                                addr,
-                            )
-
-                        console.print(table)
-                    else:
-                        console.print(
-                            f"  [yellow]No '{query}' found along route.[/yellow]"
-                        )
-
-            if directions:
-                console.print("\n[bold]Directions:[/bold]")
-                legs = route_obj.get("legs", [])
-                step_count = 1
-                for leg in legs:
-                    for step in leg.get("steps", []):
-                        nav = step.get("navigationInstruction", {})
-                        text = nav.get("instructions", "")
-                        maneuver = nav.get("maneuver", "").replace("_", " ").title()
-
-                        step_dist_meters = int(step.get("distanceMeters", 0))
-                        step_miles = step_dist_meters * 0.000621371
-                        step_dist_str = (
-                            f"{step_miles:.1f} mi"
-                            if step_miles >= 0.1
-                            else f"{step_dist_meters * 3.28084:.0f} ft"
-                        )
-
-                        if not text:
-                            text = maneuver  # Fallback
-
-                        console.print(
-                            f"{step_count}. [cyan]{text}[/cyan] ([dim]{step_dist_str}[/dim])"
-                        )
-                        step_count += 1
-            elif not find and not weather:
-                console.print(
-                    "\n[dim]Use -d for steps, -F for places, -W for weather.[/dim]"
-                )
-
-            # --- Output & Sharing ---
-            if url:
-                maps_url = generate_maps_url(final_origin, final_dest, final_mode)
-                console.print(f"\n[bold green]Open in Maps:[/bold green] {maps_url}")
-
-            if html:
-                from rich.terminal_theme import MONOKAI
-
-                console.save_html("roam_report.html", theme=MONOKAI)
-                console.print("\n[bold]Report saved to:[/bold] roam_report.html")
-
+    else:
+        if origin.lower() in places:
+            resolved = places[origin.lower()]
+            console.print(f"[dim]Resolved origin '{origin}' to: {resolved}[/dim]")
+            origin = resolved
+
+    # Resolve destination
+    if destination.lower() in places:
+        resolved = places[destination.lower()]
+        console.print(f"[dim]Resolved destination '{destination}' to: {resolved}[/dim]")
+        destination = resolved
+
+    # Load vehicle preset if provided
+    selected_vehicle_config = None
+    if vehicle_name:
+        # Case insensitive matching
+        matched_key = None
+        for k in garage:
+            if k.lower() == vehicle_name.lower():
+                matched_key = k
+                break
+
+        if matched_key:
+            selected_vehicle_config = garage[matched_key]
+            mode = selected_vehicle_config.mode
+            if selected_vehicle_config.engine:
+                engine = selected_vehicle_config.engine
+            if selected_vehicle_config.avoid_tolls:
+                avoid_tolls = True
+            if selected_vehicle_config.avoid_highways:
+                avoid_highways = True
+            console.print(f"[dim]Using garage preset: {matched_key}[/dim]")
         else:
-            console.print("[yellow]No routes found.[/yellow]")
+            console.print(
+                f"[yellow]Warning:[/] Vehicle '{vehicle_name}' not found in garage. Using provided/default options."
+            )
+
+    requester = RouteRequester(settings.google_maps_api_key)
+
+    msg = f"Routing from {origin} to {destination} via {mode}"
+    if engine:
+        msg += f" ({engine})"
+    if avoid_tolls or avoid_highways:
+        avoids = []
+        if avoid_tolls:
+            avoids.append("tolls")
+        if avoid_highways:
+            avoids.append("highways")
+        msg += f" no {', '.join(avoids)}"
+    msg += "..."
+
+    console.print(Panel(msg, title="Roam", border_style="cyan"))
+
+    try:
+        route_data = requester.compute_route(
+            origin=origin,
+            destination=destination,
+            travel_mode=mode,
+            engine_type=engine,
+            avoid_tolls=avoid_tolls,
+            avoid_highways=avoid_highways,
+        )
+
+        routes = route_data.get("routes", [])
+        if not routes:
+            console.print("[bold red]Error:[/] No routes found.")
+            sys.exit(1)
+
+        primary_route = routes[0]
+        distance_meters = primary_route.get("distanceMeters", 0)
+        duration_str = primary_route.get("duration", "0s")
+
+        distance_miles = distance_meters / 1609.344
+        formatted_dist = f"{distance_miles:.2f} miles"
+        formatted_dur = format_duration(duration_str)
+
+        console.print(f"[bold]Distance:[/] {formatted_dist}")
+        console.print(f"[bold]Duration:[/] {formatted_dur}")
+
+        # Decode polyline for spatial features
+        polyline = primary_route.get("polyline", {}).get("encodedPolyline")
+        route_points = decode_polyline(polyline) if polyline else []
+
+        # Find gas price automatically if -F gas is used
+        discovered_gas_price = None
+        find_results = {}
+
+        if find and route_points:
+            cum_dists = calculate_cumulative_distances(route_points)
+            for query in find:
+                console.print(f"\n[bold cyan]Searching for '{query}'...[/]")
+                places_found = requester.search_places_along_route(
+                    route_points, query, max_results=10
+                )
+                if not places_found:
+                    console.print(f"[dim]No places found for '{query}'.[/dim]")
+                    continue
+
+                annotated = []
+                for p in places_found:
+                    loc = p.get("location", {})
+                    plat = loc.get("latitude")
+                    plng = loc.get("longitude")
+
+                    if plat and plng:
+                        pt_idx, path_dist = get_nearest_point_on_polyline(
+                            (plat, plng), route_points, cum_dists
+                        )
+                        route_pt = route_points[pt_idx]
+                        from math import radians, cos, sin, asin, sqrt
+
+                        lat1, lon1, lat2, lon2 = map(
+                            radians, [plat, plng, route_pt[0], route_pt[1]]
+                        )
+                        dlon = lon2 - lon1
+                        dlat = lat2 - lat1
+                        a = (
+                            sin(dlat / 2) ** 2
+                            + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+                        )
+                        c = 2 * asin(sqrt(a))
+                        detour_m = 6371000 * c
+
+                        annotated.append(
+                            {
+                                "place": p,
+                                "trip_dist_m": path_dist,
+                                "detour_m": detour_m,
+                            }
+                        )
+
+                annotated.sort(key=lambda x: x["trip_dist_m"])
+                find_results[query] = annotated
+
+                # Check if query is gas related and discover best low-detour gas price
+                if "gas" in query.lower() or "fuel" in query.lower():
+                    for item in annotated:
+                        price_val = get_fuel_price_float(item["place"])
+                        if (
+                            price_val and item["detour_m"] < 1609.34
+                        ):  # under 1 mile detour
+                            if (
+                                discovered_gas_price is None
+                                or price_val < discovered_gas_price
+                            ):
+                                discovered_gas_price = price_val
+
+                # Render Table for Places
+                table = Table(
+                    title=f"{query.title()} Stops (Trip Order)",
+                    header_style="bold magenta",
+                )
+                table.add_column("Trip Mile", justify="right")
+                table.add_column("Detour", justify="right")
+                table.add_column("Name")
+                table.add_column("Rating")
+                table.add_column("Price")
+                table.add_column("Address")
+
+                for item in annotated:
+                    p = item["place"]
+                    t_mile = f"{item['trip_dist_m'] / 1609.344:.1f} mi"
+                    detour_mi = item["detour_m"] / 1609.344
+                    detour_str = f"+{detour_mi:.1f} mi"
+
+                    name = p.get("displayName", {}).get("text", "Unknown")
+                    rating = p.get("rating", "-")
+                    user_ratings = p.get("userRatingCount", 0)
+                    rating_str = f"{rating} ({user_ratings})" if rating != "-" else "-"
+
+                    price_str = format_price_level(p.get("priceLevel"))
+                    fuel_price = get_fuel_price(p)
+                    if fuel_price:
+                        price_str = fuel_price
+
+                    addr = p.get("formattedAddress", "-")
+
+                    table.add_row(t_mile, detour_str, name, rating_str, price_str, addr)
+
+                console.print(table)
+
+        # Determine effective gas price
+        effective_gas_price = gas_price
+        if effective_gas_price is None:
+            if discovered_gas_price:
+                effective_gas_price = discovered_gas_price
+                console.print(
+                    f"\n[dim]Auto-discovered lowest gas price along route: ${effective_gas_price:.2f}/gal[/dim]"
+                )
+            else:
+                effective_gas_price = 3.99
+
+        # Render Multi-Vehicle Comparison if --compare is set
+        if compare:
+            console.print("\n[bold cyan]=== Multi-Vehicle Fleet Comparison ===[/]")
+            comp_table = Table(header_style="bold yellow")
+            comp_table.add_column("Vehicle")
+            comp_table.add_column("Mode / Engine")
+            comp_table.add_column("MPG Rating", justify="right")
+            comp_table.add_column("Fuel Needed", justify="right")
+            comp_table.add_column(
+                f"Est. Gas Cost (${effective_gas_price:.2f}/gal)", justify="right"
+            )
+
+            if not garage:
+                # Add default fallback
+                comp_table.add_row(
+                    "Default Drive",
+                    "drive/gasoline",
+                    "25.0 MPG",
+                    f"{distance_miles / 25.0:.2f} gal",
+                    f"${(distance_miles / 25.0) * effective_gas_price:.2f}",
+                )
+            else:
+                for v_name, v_cfg in garage.items():
+                    v_mpg = get_mpg_for_vehicle(v_name, v_cfg, econ)
+                    gallons = distance_miles / v_mpg
+                    cost = gallons * effective_gas_price
+                    engine_str = v_cfg.engine or v_cfg.mode
+                    if econ and v_cfg.mpg_econ:
+                        engine_str += " (Econ)"
+                    comp_table.add_row(
+                        v_name,
+                        engine_str,
+                        f"{v_mpg:.1f} MPG",
+                        f"{gallons:.2f} gal",
+                        f"${cost:.2f}",
+                    )
+
+            console.print(comp_table)
+
+        # Single Vehicle Fuel Cost Calculation
+        if selected_vehicle_config or vehicle_name or not compare:
+            v_key = vehicle_name or "Default"
+            v_cfg = selected_vehicle_config or VehicleConfig(mode=mode, engine=engine)
+            v_mpg = get_mpg_for_vehicle(v_key, v_cfg, econ)
+            gallons_needed = distance_miles / v_mpg
+            trip_cost = gallons_needed * effective_gas_price
+            console.print(
+                f"[dim]Fuel Estimate ({v_key} @ {v_mpg:.1f} MPG, ${effective_gas_price:.2f}/gal): {gallons_needed:.2f} gal | ${trip_cost:.2f}[/dim]"
+            )
+
+        # Elevation Profile
+        if elevation and route_points:
+            console.print("\n[bold cyan]Fetching elevation profile...[/]")
+            elevations = requester.get_elevation_profile(route_points, samples=60)
+            if elevations:
+                chart = generate_ascii_chart(elevations)
+                console.print(chart)
+
+        # Weather Forecast
+        if weather and route_points:
+            console.print("\n[bold cyan]Fetching weather forecast along route...[/]")
+            origin_tz = get_timezone_at_point(route_points[0][0], route_points[0][1])
+            departure_dt = parse_start_time(start, date, origin_tz)
+
+            console.print(
+                f"[dim]Route Forecast: Departing at {departure_dt.strftime('%Y-%m-%d %I:%M %p')} ({origin_tz})[/dim]"
+            )
+
+            # Sample 5 points along route
+            sample_indices = [
+                0,
+                len(route_points) // 4,
+                len(route_points) // 2,
+                (len(route_points) * 3) // 4,
+                len(route_points) - 1,
+            ]
+            sample_labels = [
+                "Start",
+                "En Route (+25%)",
+                "Halfway (+50%)",
+                "En Route (+75%)",
+                "Destination",
+            ]
+
+            w_table = Table(header_style="bold green")
+            w_table.add_column("Location / Time (Local)")
+            w_table.add_column("Forecast Temp")
+            w_table.add_column("Condition")
+            w_table.add_column("Precip %")
+
+            total_dur_sec = get_seconds(duration_str)
+
+            for idx, label in zip(sample_indices, sample_labels):
+                pt = route_points[idx]
+                frac = idx / (len(route_points) - 1) if len(route_points) > 1 else 0
+                point_dt = departure_dt + timedelta(seconds=total_dur_sec * frac)
+
+                point_tz = get_timezone_at_point(pt[0], pt[1])
+                local_dt = point_dt.astimezone(ZoneInfo(point_tz))
+
+                w_data = requester.get_weather_forecast(pt[0], pt[1])
+                if w_data:
+                    fc = find_forecast_for_time(w_data, point_dt)
+                    if fc:
+                        temp = fc.get("temperature", {}).get("value", "-")
+                        unit = fc.get("temperature", {}).get("unit", "F")
+                        cond = (
+                            fc.get("weatherCondition", {})
+                            .get("description", {})
+                            .get("text", "-")
+                        )
+                        precip = fc.get("precipitationProbability", {}).get(
+                            "value", "0"
+                        )
+
+                        temp_str = (
+                            f"{temp:.1f}°{unit}"
+                            if isinstance(temp, (int, float))
+                            else "-"
+                        )
+                        time_str = (
+                            f"{label}\n[dim]{local_dt.strftime('%I:%M %p %Z')}[/dim]"
+                        )
+
+                        w_table.add_row(time_str, temp_str, cond, f"{precip}%")
+
+            console.print(w_table)
+
+        # Generate Google Maps URL
+        if url:
+            maps_link = generate_maps_url(origin, destination, mode)
+            console.print(
+                f"\n[bold cyan]Google Maps URL:[/] [link={maps_link}]{maps_link}[/link]"
+            )
+
+        # Step-by-step directions
+        if directions:
+            console.print("\n[bold cyan]Step-by-Step Directions:[s/]")
+            legs = primary_route.get("legs", [])
+            for leg in legs:
+                steps = leg.get("steps", [])
+                for i, step in enumerate(steps, 1):
+                    instr = step.get("navigationInstruction", {}).get(
+                        "instructions", "Proceed"
+                    )
+                    step_dist = format_duration(step.get("duration", "0s"))
+                    console.print(f"{i}. {instr} [dim]({step_dist})[/dim]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error computing route:[/] {e}")
+        if "--debug" in sys.argv:
+            console.print_exception()
+        sys.exit(1)
 
 
-# --- Garage Commands ---
-@cli.group(context_settings={"help_option_names": ["-h", "--help"]})
-def garage():
-    """Manage your fleet of vehicles."""
-    pass
-
-
-@garage.command(name="add", context_settings={"help_option_names": ["-h", "--help"]})
+@cli.command()
 @click.argument("name")
 @click.option(
-    "--mode",
     "-m",
+    "--mode",
     type=click.Choice(["drive", "bicycle", "two_wheeler", "transit", "walk"]),
     required=True,
     help="Travel mode",
 )
 @click.option(
-    "--engine",
     "-e",
+    "--engine",
     type=click.Choice(["gasoline", "electric", "hybrid", "diesel"]),
+    default=None,
     help="Engine type (for drive mode)",
 )
-@click.option("--avoid-tolls", "-t", is_flag=True, help="Avoid tolls")
-@click.option("--avoid-highways", "-H", is_flag=True, help="Avoid highways")
-def garage_add(name, mode, engine, avoid_tolls, avoid_highways):
+@click.option(
+    "-t",
+    "--avoid-tolls",
+    is_flag=True,
+    default=False,
+    help="Avoid tolls",
+)
+@click.option(
+    "-H",
+    "--avoid-highways",
+    is_flag=True,
+    default=False,
+    help="Avoid highways",
+)
+@click.option(
+    "--mpg",
+    type=float,
+    default=None,
+    help="Standard fuel economy MPG",
+)
+@click.option(
+    "--mpg-econ",
+    type=float,
+    default=None,
+    help="Econ mode fuel economy MPG",
+)
+def garage_add(name, mode, engine, avoid_tolls, avoid_highways, mpg, mpg_econ):
     """Add a vehicle to your garage."""
-    if not settings:
-        return
+    if settings is None:
+        console.print("[bold red]Error:[/] Settings not initialized.")
+        sys.exit(1)
 
-    garage_data = settings.load_garage()
-    garage_data[name] = VehicleConfig(
-        mode=mode, engine=engine, avoid_tolls=avoid_tolls, avoid_highways=avoid_highways
+    garage = settings.load_garage()
+    garage[name] = VehicleConfig(
+        mode=mode,
+        engine=engine,
+        avoid_tolls=avoid_tolls,
+        avoid_highways=avoid_highways,
+        mpg=mpg,
+        mpg_econ=mpg_econ,
     )
-    settings.save_garage(garage_data)
-    console.print(f"[green]Added [bold]{name}[/bold] to garage![/green]")
+    settings.save_garage(garage)
+    console.print(f"[bold green]Added {name} to garage![/]")
 
 
-@garage.command(name="list", context_settings={"help_option_names": ["-h", "--help"]})
+@cli.command()
 def garage_list():
     """List all vehicles in your garage."""
-    if not settings:
+    if settings is None:
+        console.print("[bold red]Error:[/] Settings not initialized.")
+        sys.exit(1)
+
+    garage = settings.load_garage()
+    if not garage:
+        console.print("[dim]Garage is empty.[/dim]")
         return
 
-    garage_data = settings.load_garage()
-    if not garage_data:
-        console.print(
-            "[yellow]Your garage is empty. Use `roam garage add` to populate it.[/yellow]"
-        )
-        return
+    table = Table(title="Garage", header_style="bold magenta")
+    table.add_column("Name")
+    table.add_column("Mode")
+    table.add_column("Engine")
+    table.add_column("MPG (Norm/Econ)")
+    table.add_column("Avoids")
 
-    table = Table(title="Garage")
-    table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("Mode", style="green")
-    table.add_column("Engine", style="magenta")
-    table.add_column("Avoids", style="red")
-
-    for name, config in garage_data.items():
+    for name, cfg in garage.items():
         avoids = []
-        if config.avoid_tolls:
+        if cfg.avoid_tolls:
             avoids.append("Tolls")
-        if config.avoid_highways:
+        if cfg.avoid_highways:
             avoids.append("Highways")
+        if cfg.avoid_ferries:
+            avoids.append("Ferries")
 
-        table.add_row(name, config.mode, config.engine or "-", ", ".join(avoids) or "-")
+        mpg_str = "-"
+        if cfg.mpg and cfg.mpg_econ:
+            mpg_str = f"{cfg.mpg:.1f} / {cfg.mpg_econ:.1f}"
+        elif cfg.mpg:
+            mpg_str = f"{cfg.mpg:.1f}"
+
+        table.add_row(
+            name,
+            cfg.mode,
+            cfg.engine or "-",
+            mpg_str,
+            ", ".join(avoids) if avoids else "-",
+        )
+
     console.print(table)
 
 
-@garage.command(name="remove", context_settings={"help_option_names": ["-h", "--help"]})
+@cli.command()
 @click.argument("name")
 def garage_remove(name):
     """Remove a vehicle from your garage."""
-    if not settings:
-        return
+    if settings is None:
+        console.print("[bold red]Error:[/] Settings not initialized.")
+        sys.exit(1)
 
-    garage_data = settings.load_garage()
-    if name in garage_data:
-        del garage_data[name]
-        settings.save_garage(garage_data)
-        console.print(f"[green]Removed [bold]{name}[/bold] from garage.[/green]")
+    garage = settings.load_garage()
+    if name in garage:
+        del garage[name]
+        settings.save_garage(garage)
+        console.print(f"[bold green]Removed {name} from garage.[/]")
     else:
-        console.print(f"[red]Vehicle '{name}' not found.[/red]")
+        console.print(f"[yellow]Vehicle '{name}' not found in garage.[/]")
 
 
-# --- Places Commands ---
-@cli.group(context_settings={"help_option_names": ["-h", "--help"]})
-def places():
-    """Manage saved addresses (home, work, etc.)."""
+@click.group(name="garage")
+def garage_group():
+    """Manage your fleet of vehicles."""
     pass
 
 
-@places.command(name="add", context_settings={"help_option_names": ["-h", "--help"]})
+garage_group.add_command(garage_add, name="add")
+garage_group.add_command(garage_list, name="list")
+garage_group.add_command(garage_remove, name="remove")
+cli.add_command(garage_group)
+
+
+@cli.command()
 @click.argument("name")
 @click.argument("address")
 def places_add(name, address):
     """Add a saved place."""
-    if not settings:
-        return
+    if settings is None:
+        console.print("[bold red]Error:[/] Settings not initialized.")
+        sys.exit(1)
 
-    places_data = settings.load_places()
-    places_data[name] = address
-    settings.save_places(places_data)
-    console.print(f"[green]Added [bold]{name}[/bold]: {address}[/green]")
+    places = settings.load_places()
+    places[name.lower()] = address
+    settings.save_places(places)
+    console.print(f"[bold green]Saved place '{name}' -> '{address}'![/]")
 
 
-@places.command(name="list", context_settings={"help_option_names": ["-h", "--help"]})
+@cli.command()
 def places_list():
     """List all saved places."""
-    if not settings:
+    if settings is None:
+        console.print("[bold red]Error:[/] Settings not initialized.")
+        sys.exit(1)
+
+    places = settings.load_places()
+    if not places:
+        console.print("[dim]No saved places.[/dim]")
         return
 
-    places_data = settings.load_places()
-    if not places_data:
-        console.print(
-            "[yellow]No places saved. Use `roam places add` to add one.[/yellow]"
-        )
-        return
+    table = Table(title="Saved Places", header_style="bold magenta")
+    table.add_column("Name")
+    table.add_column("Address")
 
-    table = Table(title="Saved Places")
-    table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("Address", style="green")
+    for name, addr in places.items():
+        table.add_row(name, addr)
 
-    for name, address in places_data.items():
-        table.add_row(name, address)
     console.print(table)
 
 
-@places.command(name="remove", context_settings={"help_option_names": ["-h", "--help"]})
-@click.argument("name")
-def places_remove(name):
-    """Remove a saved place."""
-    if not settings:
-        return
+@click.group(name="places")
+def places_group():
+    """Manage saved addresses (home, work, etc.)."""
+    pass
 
-    places_data = settings.load_places()
-    if name in places_data:
-        del places_data[name]
-        settings.save_places(places_data)
-        console.print(f"[green]Removed [bold]{name}[/bold] from places.[/green]")
-    else:
-        console.print(f"[red]Place '{name}' not found.[/red]")
+
+places_group.add_command(places_add, name="add")
+places_group.add_command(places_list, name="list")
+cli.add_command(places_group)
+
+
+@cli.command()
+@click.option("--start", prompt="Starting location", help="Starting address or town")
+@click.option("--end", prompt="Ending location", help="Ending address or town")
+@click.option(
+    "--miles",
+    type=float,
+    prompt="Shift mileage",
+    help="Total miles driven during shift",
+)
+@click.option(
+    "--earnings",
+    type=float,
+    prompt="Gross shift earnings ($)",
+    help="Gross cash earnings in dollars",
+)
+@click.option(
+    "--gas-price",
+    type=float,
+    default=3.99,
+    help="Gas price per gallon (default: $3.99)",
+)
+@click.option(
+    "--mpg", type=float, default=40.6, help="Vehicle fuel economy MPG (default: 40.6)"
+)
+def doordash(start, end, miles, earnings, gas_price, mpg):
+    """
+    \b
+    Calculate DoorDash shift mileage tax shelter and net profit metrics.
+
+    \b
+    Examples:
+      roam doordash --start "Corning NY" --end "Tioga PA" --miles 78.9 --earnings 22.30
+    """
+    irs_rate = 0.67  # 2026 IRS Standard Mileage Rate
+    gallons_used = miles / mpg
+    actual_gas_cost = gallons_used * gas_price
+    net_cash_profit = earnings - actual_gas_cost
+    irs_tax_deduction = miles * irs_rate
+    net_tax_shelter_gain = irs_tax_deduction - net_cash_profit
+
+    table = Table(
+        title="DoorDash Shift IRS Tax Shelter & FinOps Ledger",
+        header_style="bold green",
+    )
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="bold")
+
+    table.add_row("Shift Transit Route", f"{start} ➔ {end}")
+    table.add_row("Shift Mileage", f"{miles:.1f} Miles")
+    table.add_row("Gross Cash Earnings", f"${earnings:.2f}")
+    table.add_row(
+        "Actual Gas Spent",
+        f"-${actual_gas_cost:.2f} ({gallons_used:.2f} gal @ ${gas_price:.2f}/gal)",
+    )
+    table.add_row("Net Cash Profit", f"${net_cash_profit:.2f}")
+    table.add_row("IRS Standard Tax Deduction ($0.67/mi)", f"+${irs_tax_deduction:.2f}")
+    table.add_row(
+        "NET TAX SHELTER GAIN", f"+${net_tax_shelter_gain:.2f}", style="bold green"
+    )
+
+    console.print(Panel(table, border_style="green"))
 
 
 def main():
     cli()
+
+
+if __name__ == "__main__":
+    main()

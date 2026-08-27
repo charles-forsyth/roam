@@ -11,6 +11,8 @@ class VehicleConfig(BaseModel):
     avoid_tolls: bool = False
     avoid_highways: bool = False
     avoid_ferries: bool = False
+    mpg: Optional[float] = None
+    mpg_econ: Optional[float] = None
 
 
 class Settings(BaseSettings):
