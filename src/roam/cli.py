@@ -716,20 +716,29 @@ def route(
                 point_tz = get_timezone_at_point(pt["latitude"], pt["longitude"])
                 local_dt = point_dt.astimezone(ZoneInfo(point_tz))
 
-                w_data = requester.get_weather_forecast(pt["latitude"], pt["longitude"])
+                w_data = requester.get_hourly_forecast(pt["latitude"], pt["longitude"])
                 if w_data:
                     fc = find_forecast_for_time(w_data, point_dt)
                     if fc:
-                        temp = fc.get("temperature", {}).get("value", "-")
-                        unit = fc.get("temperature", {}).get("unit", "F")
+                        t = fc.get("temperature", {})
+                        temp = t.get("degrees", t.get("value", "-"))
+                        unit = {"FAHRENHEIT": "F", "CELSIUS": "C"}.get(
+                            t.get("unit", "F"), t.get("unit", "F")
+                        )
                         cond = (
                             fc.get("weatherCondition", {})
                             .get("description", {})
                             .get("text", "-")
                         )
-                        precip = fc.get("precipitationProbability", {}).get(
-                            "value", "0"
+                        precip = (
+                            fc.get("precipitation", {})
+                            .get("probability", {})
+                            .get("percent")
                         )
+                        if precip is None:
+                            precip = fc.get("precipitationProbability", {}).get(
+                                "value", "0"
+                            )
 
                         temp_str = (
                             f"{temp:.1f}°{unit}"

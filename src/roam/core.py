@@ -173,6 +173,7 @@ class RouteRequester:
             "location.latitude": lat,
             "location.longitude": lng,
             "hours": 240,
+            "unitsSystem": "IMPERIAL",
             "key": self.api_key,
         }
 
