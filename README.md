@@ -1,111 +1,98 @@
-# <img src="assets/logo.png" width="100" height="100" align="left" style="margin-right: 20px;"> Roam 🗺️
+# <img src="assets/logo.png" width="100" height="100" align="left" style="margin-right: 20px;"> Roam
 
-**The Personal Routing Commander.**
+**The Personal Routing & Fleet FinOps Commander (`v0.1.31`).**
 
-Roam is a CLI tool designed to generate the perfect route for **your specific vehicle** and **current intent**. It uses the Google Maps Routes API v2 to calculate paths based on engine type, travel mode, and personal preferences.
+Roam is a CLI tool designed to calculate optimal routes for **your specific vehicle fleet** and **current intent** using the Google Maps Routes API v2, Places API (New), Weather API, and Elevation API.
 
 <br clear="left"/>
 
+See [SPEC.md](SPEC.md) for the full system specification, architecture, API field masks, and requirement traceability.
+
 ## Features
 
-*   **🏎️ The Garage:** Define your fleet (e.g., "tesla", "scooter", "truck") with specific routing rules (EV efficiency, avoid highways, etc.).
-*   **📍 Address Book:** Save common locations like `home`, `work`, or `gym` for quick access.
-*   **🧭 Smart Routing:** Supports `drive`, `bicycle`, `two_wheeler`, `transit`, and `walk`.
-*   **🔋 Eco-Aware:** Optimizes for engine type (`gasoline`, `electric`, `hybrid`, `diesel`).
-*   **🗣️ Turn-by-Turn:** Get detailed directions directly in your terminal.
-*   **🔍 Search Along Route:** Find "gas", "coffee", or "EV charging" without leaving your path (Segmented Search for full coverage).
-*   **☀️ Weather Aware:** Check hourly weather forecast for points along the route (Time-zone aware).
-*   **⛰️ Elevation Profile:** Visualize the terrain with an ASCII elevation chart.
-*   **💰 Trip Costs:** See real fuel prices and estimated trip costs.
-*   **📤 Sharing:** Generate Google Maps URLs and HTML reports.
+* **The Garage (`garage.json`):** Define your vehicle fleet (`mode`, `engine`, `avoid_tolls`, `avoid_highways`, `mpg`, `mpg_econ`) and compare trip fuel costs across every vehicle with `--compare` (`-C`) and `--econ`.
+* **Saved Places (`places.json`):** Save common locations (`home`, `work`, `campus`) for instant origin/destination resolution.
+* **Eco-Aware Routing:** Supports `drive`, `bicycle`, `two_wheeler`, `transit`, and `walk`, plus engine emission optimization (`gasoline`, `electric`, `hybrid`, `diesel`).
+* **Search Along Route (`-F`):** Find `"gas"`, `"coffee"`, or `"EV charging"` along the route corridor with live fuel price discovery (`fuelOptions`) and tax-free fuel stop filtering (`-F taxfree`).
+* **Horizon-Aware Corridor Weather (`-W`):** Checks hourly (<48h) or daily (48h–10d) weather and precipitation (QPF) at waypoints timed to your arrival.
+* **ASCII Elevation Profile (`-E`):** Visualizes route terrain and elevation gain/loss in the terminal.
+* **DoorDash / Mileage Ledger (`roam doordash`):** Calculates IRS mileage tax shelter ($0.67/mi), fuel cost, and net shift profit.
+* **Sharing (`--url`, `--html`):** Generates shareable Google Maps URLs and standalone HTML trip reports.
 
 ## Installation
 
 Install directly via `uv`:
 
 ```bash
-uv tool install git+https://github.com/charles-forsyth/roam.git
+uv tool install --python 3.12 git+https://github.com/charles-forsyth/roam.git
 ```
 
 ## Configuration
 
-1.  **Get a Google Maps API Key**: Ensure the following APIs are enabled:
-    *   **Routes API**
-    *   **Places API (New)**
-    *   **Weather API** (optional)
-    *   **Elevation API** (optional)
-2.  **Set the Key**:
-    *   Create `~/.config/roam/.env` and add: `GOOGLE_MAPS_API_KEY=your_key_here`
-    *   OR export it: `export GOOGLE_MAPS_API_KEY=your_key_here`
+1. **Google Maps Platform API Key**: Enable the following APIs in your Google Cloud project:
+   * **Routes API**
+   * **Places API (New)**
+   * **Weather API**
+   * **Elevation API**
+2. **Configure `~/.config/roam/.env`** (`chmod 600`):
+   ```env
+   GOOGLE_MAPS_API_KEY=your_key_here
+   ```
 
 ## Usage
 
-### 🚀 Routing
+### 1. Routing & Fleet Comparison
 ```bash
-# Basic routing (from New York to LA)
-roam "Los Angeles"
+# Route from default 'home' place to a destination
+roam "State College, PA"
 
-# With a saved place and preset vehicle
-roam work --with tesla
+# Route using a specific garage vehicle
+roam "State College, PA" --with SCRV
 
-# Custom ad-hoc routing with shortcuts
-roam "San Francisco" -m two_wheeler -H
+# Compare fuel usage & cost across all garaged vehicles (and in Econ mode)
+roam "State College, PA" --compare
+roam "State College, PA" --compare --econ
 
-# Turn-by-turn directions
-roam "Home" -d
+# Turn-by-turn directions & shareable Google Maps link
+roam "State College, PA" -d --url
 ```
 
-### 🔍 Search & Weather
+### 2. Search Along Route, Weather & Elevation
 ```bash
-# Find places along the route (e.g. gas)
-roam "Las Vegas" -F "gas"
+# Find gas stations with live fuel prices along the route
+roam "Syracuse, NY" -F "gas"
 
-# Check weather conditions
-roam "Seattle" -W
+# Check arrival-timed weather and elevation profile along the route
+roam "Syracuse, NY" -W -E
+
+# Export an HTML trip report
+roam "Syracuse, NY" -W -E --html
 ```
 
-### ⛰️ Elevation & Reports
+### 3. Managing Your Garage
 ```bash
-# View Elevation Profile
-roam "Lake Tahoe" -E
-
-# Export HTML Report
-roam "Portland" --html
+roam garage-add "SCRV" --mode drive --engine hybrid --mpg 36.0 --mpg-econ 44.0 --avoid-tolls
+roam garage-list
+roam garage-remove "SCRV"
 ```
 
-### 🏎️ Managing Your Garage
+### 4. Managing Saved Places
 ```bash
-# Add a vehicle
-roam garage add "tesla" --mode drive --engine electric --avoid-tolls
-
-# List vehicles
-roam garage list
-
-# Use a vehicle
-roam "Las Vegas" --with tesla
+roam places-add home "123 Main St, Springfield, IL"
+roam places-add work "900 University Ave, Riverside, CA"
+roam places-list
+roam work --origin home
 ```
 
-### 📍 Managing Places
+### 5. Mileage & Shift Tax Shelter Calculator
 ```bash
-# Add a place
-roam places add home "1539 Button Hill Road, Tioga, PA 16946"
-
-# List places
-roam places list
-
-# Use a place as origin/destination
-roam home --origin work
+roam doordash --start home --end home --miles 32.30 --earnings 45.00 --mpg 36.0 --gas-price 3.99
 ```
 
 ## Development
 
-1.  Clone the repo.
-2.  Install `uv`.
-3.  Run setup:
-    ```bash
-    uv sync
-    ```
-4.  Run tests:
-    ```bash
-    uv run pytest
-    ```
+```bash
+uv sync --python 3.12
+uv run --python 3.12 pytest
+uv run --python 3.12 ruff check .
+```
