@@ -1,5 +1,7 @@
 # <img src="assets/logo.png" width="100" height="100" align="left" style="margin-right: 20px;"> Roam
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23755671.svg)](https://doi.org/10.5281/zenodo.23755671)
+
 **The Personal Routing & Fleet FinOps Commander (`v0.1.31`).**
 
 Roam is a CLI tool designed to calculate optimal routes for **your specific vehicle fleet** and **current intent** using the Google Maps Routes API v2, Places API (New), Weather API, and Elevation API.
