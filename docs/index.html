@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roam: Personal Routing &amp; Fleet FinOps Commander</title>
+  <meta name="description" content="Personal routing, vehicle fleet management, and mileage tax shelter ledger CLI powered by Google Maps Routes API v2.">
+  <meta name="author" content="Charles E. Forsyth III">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #111827;
+      --card-border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.15);
+      --accent-subtle: #0284c7;
+      --terminal-bg: #030712;
+      --code-bg: #1e293b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+    /* Nav */
+    header {
+      border-bottom: 1px solid var(--card-border);
+      position: sticky;
+      top: 0;
+      background: rgba(11, 15, 25, 0.85);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+    }
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 1.25rem;
+      color: #fff;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      color: #fff;
+    }
+    .nav-links { display: flex; gap: 24px; font-size: 0.95rem; align-items: center; }
+    .nav-links a { color: var(--text-muted); }
+    .nav-links a:hover { color: #fff; text-decoration: none; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      transition: all 0.2s ease;
+    }
+    .btn-primary {
+      background: #0284c7;
+      color: #fff;
+      border: 1px solid #38bdf8;
+    }
+    .btn-primary:hover {
+      background: #0369a1;
+      text-decoration: none;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+    .btn-secondary {
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+    }
+    .btn-secondary:hover {
+      border-color: #38bdf8;
+      text-decoration: none;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+    }
+    .badges {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 5vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    .hero-gradient {
+      background: linear-gradient(135deg, #fff 30%, #38bdf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 720px;
+      margin: 0 auto 32px;
+    }
+    .install-box {
+      max-width: 580px;
+      margin: 0 auto 36px;
+      background: var(--terminal-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.95rem;
+    }
+    .install-box code { color: #38bdf8; }
+    .install-copy {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    .install-copy:hover { color: #fff; background: var(--card-border); }
+
+    /* Features Grid */
+    .section-title {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+    .section-desc {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      margin-bottom: 40px;
+    }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-bottom: 80px;
+    }
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .feature-card:hover {
+      transform: translateY(-2px);
+      border-color: #38bdf8;
+    }
+    .feature-icon {
+      font-size: 1.75rem;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    /* Screenshots Section */
+    .showcase {
+      margin-bottom: 80px;
+    }
+    .terminal-window {
+      background: var(--terminal-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 32px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+    }
+    .terminal-header {
+      background: #111827;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+    .dot-red { background: #ef4444; }
+    .dot-yellow { background: #f59e0b; }
+    .dot-green { background: #10b981; }
+    .terminal-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-left: 8px;
+    }
+    .terminal-img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    /* Code Examples */
+    .examples-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+      margin-bottom: 80px;
+    }
+    .code-card {
+      background: var(--terminal-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .code-card h4 {
+      font-size: 0.95rem;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    .code-card p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .code-block {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      background: #0d1117;
+      border: 1px solid #21262d;
+      padding: 12px;
+      border-radius: 6px;
+      color: #38bdf8;
+      overflow-x: auto;
+    }
+
+    /* Citation */
+    .citation-box {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 80px;
+    }
+    .citation-box pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      background: var(--terminal-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      color: #e2e8f0;
+      overflow-x: auto;
+      margin-top: 16px;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--card-border);
+      padding: 40px 0;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      text-align: center;
+    }
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: #fff; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="container nav">
+      <div class="brand">
+        <div class="brand-icon">R</div>
+        <span>Roam</span>
+      </div>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#terminal">Terminal Tour</a>
+        <a href="#examples">Examples</a>
+        <a href="#citation">Citation</a>
+        <a href="https://github.com/charles-forsyth/roam" class="btn btn-secondary" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="badges">
+        <span class="badge">v0.1.31</span>
+        <span class="badge">Python 3.12+</span>
+        <span class="badge">MIT License</span>
+        <span class="badge">Routes API v2</span>
+      </div>
+      <h1>The Personal Routing &amp; <span class="hero-gradient">Fleet FinOps Commander</span></h1>
+      <p>Calculate optimal routes for your custom vehicle fleet and current intent. Features eco-aware routing, live fuel price discovery, waypoint weather corridors, ASCII elevation profiles, and DoorDash IRS mileage shelter ledgers.</p>
+      
+      <div class="install-box">
+        <code>uv tool install git+https://github.com/charles-forsyth/roam.git</code>
+        <button class="install-copy" onclick="navigator.clipboard.writeText('uv tool install git+https://github.com/charles-forsyth/roam.git')">Copy</button>
+      </div>
+
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <a href="https://github.com/charles-forsyth/roam" class="btn btn-primary" target="_blank" rel="noopener">View Repository</a>
+        <a href="#terminal" class="btn btn-secondary">Explore Terminal Output</a>
+      </div>
+    </section>
+
+    <section id="features">
+      <h2 class="section-title">Key Capabilities</h2>
+      <p class="section-desc">Engineered for drivers, commuters, and delivery operators managing multi-vehicle fleets.</p>
+      <div class="features">
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F698;</div>
+          <h3>Fleet Garage FinOps</h3>
+          <p>Define your vehicle fleet with custom fuel types, highway/city MPG, and compare trip fuel costs across every vehicle instantly.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F30D;</div>
+          <h3>Eco-Aware Routing</h3>
+          <p>Supports drive, bicycle, two-wheeler, transit, and walking modes with engine emission optimizations (gasoline, EV, hybrid, diesel).</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x26C5;</div>
+          <h3>Corridor Weather &amp; Elevation</h3>
+          <p>Checks hourly or multi-day weather at waypoints timed precisely to your arrival, with ASCII elevation gain/loss profiles.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F4B8;</div>
+          <h3>IRS Tax Shelter Ledger</h3>
+          <p>Calculates DoorDash and gig delivery shift profitability against the IRS standard mileage deduction ($0.67/mi) and actual fuel costs.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="terminal" class="showcase">
+      <h2 class="section-title">Terminal Showcase</h2>
+      <p class="section-desc">Real, unmodified terminal outputs captured directly from the CLI engine.</p>
+
+      <div class="terminal-window">
+        <div class="terminal-header">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+          <span class="terminal-title">roam --help</span>
+        </div>
+        <img src="screenshots/roam-help.png" alt="Roam CLI Help Output" class="terminal-img" loading="lazy">
+      </div>
+
+      <div class="terminal-window">
+        <div class="terminal-header">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+          <span class="terminal-title">roam doordash --start "Downtown" --end "Uptown" --miles 25.0 --earnings 45.00</span>
+        </div>
+        <img src="screenshots/roam-doordash.png" alt="Roam DoorDash Tax Shelter Ledger" class="terminal-img" loading="lazy">
+      </div>
+    </section>
+
+    <section id="examples">
+      <h2 class="section-title">Usage Examples</h2>
+      <p class="section-desc">Command recipes for everyday navigation and fleet operations.</p>
+      <div class="examples-grid">
+        <div class="code-card">
+          <h4>Standard Route Calculation</h4>
+          <p>Calculate optimal driving directions to a destination:</p>
+          <div class="code-block">roam "Los Angeles"</div>
+        </div>
+        <div class="code-card">
+          <h4>Fleet Vehicle Comparison</h4>
+          <p>Compare fuel expenses across all garage vehicles:</p>
+          <div class="code-block">roam "Las Vegas" --compare --econ</div>
+        </div>
+        <div class="code-card">
+          <h4>Route Corridor Weather</h4>
+          <p>Check arrival-timed weather and elevation profile:</p>
+          <div class="code-block">roam "Big Bear" -W -E</div>
+        </div>
+        <div class="code-card">
+          <h4>Gig Delivery FinOps</h4>
+          <p>Track delivery shift tax shelter and net profit:</p>
+          <div class="code-block">roam doordash --start "Central" --end "North" --miles 35.2 --earnings 62.50</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="citation" class="citation-box">
+      <h2 class="section-title">Citation</h2>
+      <p class="section-desc" style="margin-bottom: 16px;">If you use Roam in research or fleet logistics operations, please cite this repository:</p>
+      <p><strong>Forsyth, C. E. III (2026).</strong> <em>Roam: The Personal Routing Commander</em> (Version 0.1.31) [Computer software]. University of California, Riverside. https://github.com/charles-forsyth/roam</p>
+      <pre><code>@software{forsyth2026roam,
+  author       = {Forsyth, Charles E. III},
+  title        = {Roam: The Personal Routing Commander},
+  version      = {0.1.31},
+  year         = {2026},
+  publisher    = {GitHub},
+  affiliation  = {University of California, Riverside},
+  url          = {https://github.com/charles-forsyth/roam}
+}</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>Roam is open source under the <a href="https://github.com/charles-forsyth/roam/blob/main/LICENSE">MIT License</a> &bull; Created by <a href="https://orcid.org/0000-0003-4872-0296" target="_blank" rel="noopener">Charles Forsyth</a>, University of California, Riverside.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
